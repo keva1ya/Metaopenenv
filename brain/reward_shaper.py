@@ -2,8 +2,8 @@
 Reward Shaper for Big Brain training.
 
 Four independent reward components combined:
-  r1: Financial reward   (weight 0.5)
-  r2: Fraud reward       (weight 0.3)
+  r1: Financial reward   (weight 0.4)
+  r2: Fraud reward       (weight 0.4)
   r3: Policy reward      (weight 0.2)
 
 Hard overrides checked first to prevent reward hacking.
@@ -31,27 +31,27 @@ def calculate_shaped_reward(
     """
     # HARD OVERRIDES (check first, return immediately)
     if _is_strong_fraud(obs) and action == "APPROVE":
-        return -1.0
+        return 0.0
     if _is_high_financial_risk(obs) and action == "APPROVE":
-        return -1.0
+        return 0.0
 
     # MORTGAGE_MODE shortcut
     if obs.mortgage_value >= 1.1 * obs.loan_amount:
         return 1.0 if action == "APPROVE" else 0.0
 
     # THREE REWARD COMPONENTS
-    r1 = _financial_reward(obs, action)     # weight 0.5
-    r2 = _fraud_reward(obs, action)         # weight 0.3
+    r1 = _financial_reward(obs, action)     # weight 0.4
+    r2 = _fraud_reward(obs, action)         # weight 0.4
     r3 = _policy_reward(obs, action)        # weight 0.2
 
-    total = 0.5 * r1 + 0.3 * r2 + 0.2 * r3
-    return float(np.clip(total, -1.0, 1.0))
+    total = 0.4 * r1 + 0.4 * r2 + 0.2 * r3
+    return float(np.clip(total, 0.0, 1.0))
 
 
 def _financial_reward(obs: LoanObservation, action: str) -> float:
     """Reward based on financial risk assessment."""
     if obs.mortgage_value >= 1.1 * obs.loan_amount:
-        return 1.0 if action == "APPROVE" else -0.5
+        return 1.0 if action == "APPROVE" else 0.0
 
     risk_score = (
         0.4 * (obs.credit_score - 300) / 550
@@ -65,14 +65,14 @@ def _financial_reward(obs: LoanObservation, action: str) -> float:
     if risk_score > 0.55:
         return 1.0 if action == "APPROVE" else 0.0
     else:
-        return 1.0 if action == "REJECT" else -0.5
+        return 1.0 if action == "REJECT" else 0.0
 
 
 def _fraud_reward(obs: LoanObservation, action: str) -> float:
     """Reward based on fraud signal strength."""
     fs = _get_fraud_score(obs)
     if fs >= 2:
-        return 1.0 if action == "REJECT" else -1.0
+        return 1.0 if action == "REJECT" else 0.0
     elif fs == 1:
         return 0.5 if action == "REQUEST_MORE_INFO" else 0.0
     else:
@@ -100,8 +100,8 @@ def _policy_reward(obs: LoanObservation, action: str) -> float:
         violations += 1
 
     if violations > 0:
-        return 1.0 if action == "REJECT" else -0.5
-    return 1.0 if action == "APPROVE" else -0.3
+        return 1.0 if action == "REJECT" else 0.0
+    return 1.0 if action == "APPROVE" else 0.0
 
 
 
