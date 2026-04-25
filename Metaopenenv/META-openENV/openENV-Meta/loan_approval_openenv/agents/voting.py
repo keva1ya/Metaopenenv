@@ -1,0 +1,154 @@
+"""
+Voting Engine for the Head Agent Council.
+
+Aggregates votes from RiskAgent, FraudAgent, PolicyAgent.
+Detects dissent and logs it to logs/dissent_log.json.
+Returns a VoteResult which is a RECOMMENDATION to Big Brain,
+NOT the final decision.
+"""
+
+import json
+import os
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+from agents.council.risk_agent import HeadAgentVote
+from agents.sub_agents.risk.credit_analyst import SubAgentReport
+from env.action import LoanAction
+
+
+class DissentLog(BaseModel):
+    """Record of a dissenting vote in the council."""
+
+    episode: int
+    dissenting_agent: str
+    minority_decision: str
+    majority_decision: str
+    dissent_reason: str
+    timestamp: str
+
+
+class VoteResult(BaseModel):
+    """
+    Result of the council voting process.
+    This is a RECOMMENDATION to Big Brain, not the final decision.
+    """
+
+    council_recommendation: LoanAction
+    vote_breakdown: Dict[str, str]
+    was_unanimous: bool
+    dissent_log: Optional[DissentLog] = None
+    confidence_average: float
+    all_sub_reports: List[SubAgentReport] = Field(default_factory=list)
+
+
+class VotingEngine:
+    """
+    Aggregates head agent votes using equal-weight majority.
+    Detects and logs dissent. Never overwrites existing logs.
+    """
+
+    DISSENT_LOG_PATH = "logs/dissent_log.json"
+
+    def run_vote(
+        self,
+        votes: List[HeadAgentVote],
+        episode: int,
+    ) -> VoteResult:
+        """
+        Count votes with equal weight (1.0 each).
+        Majority determines council_recommendation.
+        3-way tie: PolicyAgent breaks tie.
+        """
+        # Build vote breakdown
+        vote_breakdown: Dict[str, str] = {}
+        for v in votes:
+            vote_breakdown[v.agent_name] = v.decision.value
+
+        # Count votes
+        tally: Dict[str, int] = {}
+        for v in votes:
+            action = v.decision.value
+            tally[action] = tally.get(action, 0) + 1
+
+        # Determine majority
+        max_count = max(tally.values())
+        winners = [a for a, c in tally.items() if c == max_count]
+
+        if len(winners) == 1:
+            majority_action = winners[0]
+        else:
+            # Tie: PolicyAgent breaks it
+            policy_vote = None
+            for v in votes:
+                if v.agent_name == "PolicyAgent":
+                    policy_vote = v.decision.value
+                    break
+            majority_action = policy_vote if policy_vote else winners[0]
+
+        council_recommendation = LoanAction(majority_action)
+
+        # Check unanimity
+        all_same = all(v.decision.value == majority_action for v in votes)
+        was_unanimous = all_same
+
+        # Calculate confidence average
+        conf_sum = sum(v.confidence for v in votes)
+        confidence_average = conf_sum / max(len(votes), 1)
+
+        # Detect dissent
+        dissent_log_entry: Optional[DissentLog] = None
+        if not was_unanimous:
+            dissent_entries: List[DissentLog] = []
+            for v in votes:
+                if v.decision.value != majority_action:
+                    dissent_entries.append(
+                        DissentLog(
+                            episode=episode,
+                            dissenting_agent=v.agent_name,
+                            minority_decision=v.decision.value,
+                            majority_decision=majority_action,
+                            dissent_reason=v.reasoning,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+                    )
+
+            if dissent_entries:
+                # Keep UI behavior stable by exposing first dissenter in VoteResult.
+                dissent_log_entry = dissent_entries[0]
+                for entry in dissent_entries:
+                    self._append_dissent(entry)
+
+        return VoteResult(
+            council_recommendation=council_recommendation,
+            vote_breakdown=vote_breakdown,
+            was_unanimous=was_unanimous,
+            dissent_log=dissent_log_entry,
+            confidence_average=confidence_average,
+            all_sub_reports=[],
+        )
+
+    def _append_dissent(self, entry: DissentLog) -> None:
+        """
+        Append dissent entry to logs/dissent_log.json.
+        Never overwrites — always appends.
+        Creates file with [] if it doesn't exist.
+        """
+        os.makedirs(os.path.dirname(self.DISSENT_LOG_PATH), exist_ok=True)
+
+        if not os.path.exists(self.DISSENT_LOG_PATH):
+            with open(self.DISSENT_LOG_PATH, "w") as f:
+                json.dump([], f)
+
+        with open(self.DISSENT_LOG_PATH, "r") as f:
+            try:
+                logs = json.load(f)
+            except json.JSONDecodeError:
+                logs = []
+
+        logs.append(entry.model_dump())
+
+        with open(self.DISSENT_LOG_PATH, "w") as f:
+            json.dump(logs, f, indent=2)
