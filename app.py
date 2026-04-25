@@ -207,7 +207,15 @@ def get_dissent_log() -> list:
 # ═══════════════════════════════════════════════════════════════
 
 
-def process_next_applicant(selected_action: str, risk_model: str, fraud_model: str, policy_model: str):
+def process_next_applicant(
+    selected_action: str, 
+    risk_model: str, 
+    fraud_model: str, 
+    policy_model: str,
+    risk_weight: int,
+    fraud_weight: int,
+    policy_weight: int
+):
     """Process one complete episode through the full pipeline."""
     global current_council, last_override_info
 
@@ -291,9 +299,14 @@ def process_next_applicant(selected_action: str, risk_model: str, fraud_model: s
     vote_bd = council.vote_breakdown
     agent_rs = council.agent_reasoning
     agent_cf = council.agent_confidence
-    risk_text = f"VOTE: {vote_bd.get('RiskAgent', 'N/A')} ({agent_cf.get('RiskAgent', 0.0):.0%})\nREASON: {agent_rs.get('RiskAgent', 'N/A')}"
-    fraud_text = f"VOTE: {vote_bd.get('FraudAgent', 'N/A')} ({agent_cf.get('FraudAgent', 0.0):.0%})\nREASON: {agent_rs.get('FraudAgent', 'N/A')}"
-    policy_text = f"VOTE: {vote_bd.get('PolicyAgent', 'N/A')} ({agent_cf.get('PolicyAgent', 0.0):.0%})\nREASON: {agent_rs.get('PolicyAgent', 'N/A')}"
+    
+    risk_score = agent_cf.get('RiskAgent', 0.0) * risk_weight
+    fraud_score = agent_cf.get('FraudAgent', 0.0) * fraud_weight
+    policy_score = agent_cf.get('PolicyAgent', 0.0) * policy_weight
+    
+    risk_text = f"VOTE: {vote_bd.get('RiskAgent', 'N/A')} (Weighted Score: {risk_score:.1f})\nREASON: {agent_rs.get('RiskAgent', 'N/A')}"
+    fraud_text = f"VOTE: {vote_bd.get('FraudAgent', 'N/A')} (Weighted Score: {fraud_score:.1f})\nREASON: {agent_rs.get('FraudAgent', 'N/A')}"
+    policy_text = f"VOTE: {vote_bd.get('PolicyAgent', 'N/A')} (Weighted Score: {policy_score:.1f})\nREASON: {agent_rs.get('PolicyAgent', 'N/A')}"
 
     if council.dissent_log:
         dissent_badge = f" 🔴 DISSENT: {council.dissent_log.dissenting_agent}"
@@ -484,7 +497,22 @@ def create_gradio_app() -> gr.Blocks:
                 label="⚡ Last Override", interactive=False
             )
 
-        # ── PANEL 8: Advanced Model Configuration ───────────
+        # ── PANEL 8: Scoring Multipliers ────────────────────
+        gr.Markdown("---")
+        with gr.Accordion("⚖️ Agent Scoring Multipliers (Must sum to 100)", open=True):
+            gr.Markdown("Adjust the scoring weights for each head agent. These multipliers will scale the individual LLM confidence outputs.")
+            with gr.Row():
+                risk_weight_slider = gr.Slider(
+                    minimum=0, maximum=100, step=1, value=33, label="Risk Multiplier"
+                )
+                fraud_weight_slider = gr.Slider(
+                    minimum=0, maximum=100, step=1, value=33, label="Fraud Multiplier"
+                )
+                policy_weight_slider = gr.Slider(
+                    minimum=0, maximum=100, step=1, value=34, label="Policy Multiplier"
+                )
+
+        # ── PANEL 9: Advanced Model Configuration ───────────
         gr.Markdown("---")
         with gr.Accordion("⚙️ Advanced Model Configuration", open=False):
             gr.Markdown("Configure the OpenRouter model acting as each specific Loan Agent.")
@@ -536,7 +564,15 @@ def create_gradio_app() -> gr.Blocks:
         # ── WIRING ──────────────────────────────────────────
         next_btn.click(
             fn=process_next_applicant,
-            inputs=[action_radio, risk_model_dropdown, fraud_model_dropdown, policy_model_dropdown],
+            inputs=[
+                action_radio, 
+                risk_model_dropdown, 
+                fraud_model_dropdown, 
+                policy_model_dropdown,
+                risk_weight_slider,
+                fraud_weight_slider,
+                policy_weight_slider
+            ],
             outputs=[
                 financial_df,
                 behavioral_df,
