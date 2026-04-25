@@ -119,12 +119,12 @@ class PolicyAgent:
         reasoning = text
 
         dec_match = re.search(
-            r"DECISION:\s*(APPROVE|REJECT|REQUEST_MORE_INFO)", text, re.IGNORECASE
+            r"DECISION[^\w]*(APPROVE|REJECT|REQUEST_MORE_INFO)", text, re.IGNORECASE
         )
         if dec_match:
             decision = LoanAction(dec_match.group(1).upper())
 
-        conf_match = re.search(r"CONFIDENCE:\s*([0-9.]+)(%?)", text)
+        conf_match = re.search(r"CONFIDENCE[^\w]*([0-9.]+)(%?)", text, re.IGNORECASE)
         if conf_match:
             val = float(conf_match.group(1))
             is_percent = conf_match.group(2) == "%"
@@ -132,7 +132,7 @@ class PolicyAgent:
                 val = val / 100.0
             confidence = max(0.0, min(1.0, val))
 
-        reason_match = re.search(r"REASONING:\s*(.+)", text, re.DOTALL)
+        reason_match = re.search(r"REASONING[^\w]*(.+)", text, re.IGNORECASE | re.DOTALL)
         if reason_match:
             reasoning = reason_match.group(1).strip()
 
