@@ -180,7 +180,7 @@ class LoanApprovalEnv:
 
         return vote_result
 
-    def step(self, action: LoanAction) -> Tuple[LoanObservation, float, bool, dict]:
+    def step(self, action: LoanAction, council_result: Optional[VoteResult] = None) -> Tuple[LoanObservation, float, bool, dict]:
         """
         Execute one step in the environment.
         Returns (next_obs, reward, done, info).
@@ -232,7 +232,8 @@ class LoanApprovalEnv:
             )
 
         # ── HARD: Full pipeline ──────────────────────────
-        council_result = self.get_council_recommendation()
+        if council_result is None:
+            council_result = self.get_council_recommendation()
 
         financial_risk = self._get_financial_risk(obs)
         behavioral_risk = self._get_behavioral_risk(obs)

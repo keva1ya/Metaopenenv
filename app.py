@@ -53,7 +53,11 @@ brain.load("brain/big_brain_weights.pt")
 current_council: Optional[VoteResult] = None
 last_override_info: str = "No overrides yet"
 
-DEMO_MODE = not bool(os.getenv("OPENAI_API_KEY"))
+DEMO_MODE = not (
+    bool(os.getenv("NEMOTRON_API_KEY")) and 
+    bool(os.getenv("GLM_API_KEY")) and 
+    bool(os.getenv("MINIMAX_API_KEY"))
+)
 
 # ═══════════════════════════════════════════════════════════════
 # FASTAPI BACKEND
@@ -358,7 +362,7 @@ def create_gradio_app() -> gr.Blocks:
         # ── HEADER ──────────────────────────────────────────
         if DEMO_MODE:
             gr.Markdown(
-                "## ⚠️ DEMO MODE — No OpenAI API key detected. "
+                "## ⚠️ DEMO MODE — No OpenRouter API keys detected. "
                 "Head agents using rule-based fallback."
             )
 

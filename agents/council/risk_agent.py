@@ -70,7 +70,7 @@ class RiskAgent:
         """
         try:
             if self.client is None:
-                raise ValueError("No OpenAI client configured")
+                raise ValueError("No OpenRouter client configured")
 
             # Build user prompt with financial fields only
             report_lines = []

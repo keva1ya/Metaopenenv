@@ -61,7 +61,7 @@ class PolicyAgent:
         """
         try:
             if self.client is None:
-                raise ValueError("No OpenAI client configured")
+                raise ValueError("No OpenRouter client configured")
 
             report_lines = []
             for r in sub_reports:
