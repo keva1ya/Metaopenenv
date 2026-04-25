@@ -137,9 +137,13 @@ class RiskAgent:
             decision = LoanAction(dec_match.group(1).upper())
 
         # Extract confidence
-        conf_match = re.search(r"CONFIDENCE:\s*([0-9.]+)", text)
+        conf_match = re.search(r"CONFIDENCE:\s*([0-9.]+)(%?)", text)
         if conf_match:
-            confidence = max(0.0, min(1.0, float(conf_match.group(1))))
+            val = float(conf_match.group(1))
+            is_percent = conf_match.group(2) == "%"
+            if is_percent or val > 1.0:
+                val = val / 100.0
+            confidence = max(0.0, min(1.0, val))
 
         # Extract reasoning
         reason_match = re.search(r"REASONING:\s*(.+)", text, re.DOTALL)
