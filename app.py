@@ -578,6 +578,7 @@ def create_gradio_app() -> gr.Blocks:
 
     return demo
 
+demo = create_gradio_app()
 
 # ═══════════════════════════════════════════════════════════════
 # ENTRY POINT
@@ -593,7 +594,6 @@ if __name__ == "__main__":
     print("FastAPI running on http://0.0.0.0:8000")
 
     # Start Gradio
-    demo = create_gradio_app()
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,

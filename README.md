@@ -1,5 +1,14 @@
-# AI Loan Approval System
+---
+title: AI Loan Approval System
+emoji: 🏦
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+app_file: app.py
+pinned: false
+---
 
+# AI Loan Approval System
 ## Overview
 A three-level loan decision engine built for Hugging Face Spaces:
 - Level 1: 8 deterministic sub-agents (risk, fraud, policy)
