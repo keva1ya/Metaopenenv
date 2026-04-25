@@ -244,7 +244,6 @@ class LoanApprovalEnv:
         reward = calculate_shaped_reward(
             obs,
             action.value,
-            council_result,
             self.task_level,
         )
 

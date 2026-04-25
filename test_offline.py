@@ -87,7 +87,7 @@ print(f'   Breakdown: {vote_result.vote_breakdown}')
 
 # Test reward shaper
 from brain.reward_shaper import calculate_shaped_reward
-shaped_r = calculate_shaped_reward(obs, 'APPROVE', vote_result, 'hard')
+shaped_r = calculate_shaped_reward(obs, 'APPROVE', 'hard')
 print(f'\n💰 Reward Shaping Engine Base Check -> Evaluated Reward Score: {shaped_r:.4f}')
 
 # Test state builder

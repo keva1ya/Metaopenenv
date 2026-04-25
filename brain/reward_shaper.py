@@ -2,10 +2,9 @@
 Reward Shaper for Big Brain training.
 
 Four independent reward components combined:
-  r1: Financial reward   (weight 0.4)
+  r1: Financial reward   (weight 0.5)
   r2: Fraud reward       (weight 0.3)
   r3: Policy reward      (weight 0.2)
-  r4: Alignment reward   (weight 0.1)
 
 Hard overrides checked first to prevent reward hacking.
 Multiple signals prevent the agent from gaming any single metric.
@@ -22,14 +21,13 @@ from env.observation import LoanObservation
 def calculate_shaped_reward(
     obs: LoanObservation,
     action: str,
-    council_result: Optional[VoteResult],
     task_level: str,
 ) -> float:
     """
     Calculate multi-component shaped reward for the Big Brain.
 
     Hard overrides are checked first and return immediately.
-    Then four weighted components are combined and clipped.
+    Then three weighted components are combined and clipped.
     """
     # HARD OVERRIDES (check first, return immediately)
     if _is_strong_fraud(obs) and action == "APPROVE":
@@ -41,13 +39,12 @@ def calculate_shaped_reward(
     if obs.mortgage_value >= 1.1 * obs.loan_amount:
         return 1.0 if action == "APPROVE" else 0.0
 
-    # FOUR REWARD COMPONENTS
-    r1 = _financial_reward(obs, action)     # weight 0.4
+    # THREE REWARD COMPONENTS
+    r1 = _financial_reward(obs, action)     # weight 0.5
     r2 = _fraud_reward(obs, action)         # weight 0.3
     r3 = _policy_reward(obs, action)        # weight 0.2
-    r4 = _alignment_reward(action, council_result)  # weight 0.1
 
-    total = 0.4 * r1 + 0.3 * r2 + 0.2 * r3 + 0.1 * r4
+    total = 0.5 * r1 + 0.3 * r2 + 0.2 * r3
     return float(np.clip(total, -1.0, 1.0))
 
 
@@ -107,16 +104,7 @@ def _policy_reward(obs: LoanObservation, action: str) -> float:
     return 1.0 if action == "APPROVE" else -0.3
 
 
-def _alignment_reward(
-    action: str, council_result: Optional[VoteResult]
-) -> float:
-    """Reward for aligning with unanimous council votes."""
-    if council_result is None:
-        return 0.0
-    if not council_result.was_unanimous:
-        return 0.0
-    council_action = council_result.council_recommendation.value
-    return 0.1 if action == council_action else -0.1
+
 
 
 def _get_fraud_score(obs: LoanObservation) -> int:

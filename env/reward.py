@@ -15,7 +15,7 @@ class RewardOutput(BaseModel):
     Structured reward output from a grader.
 
     Attributes:
-        score: Reward value, typically in [-1.0, 1.0].
+        score: Reward value, typically in [0.0, 1.0].
         reason: Human-readable explanation of the reward.
         risk_breakdown: Dictionary of risk factors evaluated.
     """
