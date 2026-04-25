@@ -290,9 +290,10 @@ def process_next_applicant(selected_action: str, risk_model: str, fraud_model: s
 
     vote_bd = council.vote_breakdown
     agent_rs = council.agent_reasoning
-    risk_text = f"VOTE: {vote_bd.get('RiskAgent', 'N/A')} ({council.confidence_average:.0%})\nREASON: {agent_rs.get('RiskAgent', 'N/A')}"
-    fraud_text = f"VOTE: {vote_bd.get('FraudAgent', 'N/A')} ({council.confidence_average:.0%})\nREASON: {agent_rs.get('FraudAgent', 'N/A')}"
-    policy_text = f"VOTE: {vote_bd.get('PolicyAgent', 'N/A')} ({council.confidence_average:.0%})\nREASON: {agent_rs.get('PolicyAgent', 'N/A')}"
+    agent_cf = council.agent_confidence
+    risk_text = f"VOTE: {vote_bd.get('RiskAgent', 'N/A')} ({agent_cf.get('RiskAgent', 0.0):.0%})\nREASON: {agent_rs.get('RiskAgent', 'N/A')}"
+    fraud_text = f"VOTE: {vote_bd.get('FraudAgent', 'N/A')} ({agent_cf.get('FraudAgent', 0.0):.0%})\nREASON: {agent_rs.get('FraudAgent', 'N/A')}"
+    policy_text = f"VOTE: {vote_bd.get('PolicyAgent', 'N/A')} ({agent_cf.get('PolicyAgent', 0.0):.0%})\nREASON: {agent_rs.get('PolicyAgent', 'N/A')}"
 
     if council.dissent_log:
         dissent_badge = f" 🔴 DISSENT: {council.dissent_log.dissenting_agent}"
