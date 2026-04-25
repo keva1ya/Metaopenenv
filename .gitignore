@@ -1,4 +1,20 @@
-.venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Local secrets
+.env
+
+# Runtime/log artifacts
+logs/*.json
+brain/*.pt
+
+# IDE/OS
+.vscode/
+.idea/
 .DS_Store
+Thumbs.db
