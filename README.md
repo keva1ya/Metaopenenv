@@ -13,7 +13,7 @@ pinned: false
 A three-level loan decision engine built for Hugging Face Spaces:
 - Level 1: 8 deterministic sub-agents (risk, fraud, policy)
 - Level 2: 3 head agents (Powered by OpenRouter LLMs with deterministic fallback)
-- Level 3: Big Brain DQN final decision
+- Level 3: Dynamic weighted final decision engine
 
 The app provides:
 - Gradio UI on port 7860 (Hugging Face ready Glass theme)
@@ -65,6 +65,11 @@ MINIMAX_API_KEY=sk-or-v1-...
 ```
 
 If any key is empty, the system runs in DEMO mode with deterministic fallbacks.
+
+Additional runtime controls are available in `.env`:
+- `RL_TRACE_ENABLED`, `RL_TRACE_PATH`, `RL_TRACE_FLUSH_EVERY`
+- `GRPO_TRAIN_ENABLED`, `GRPO_TRAIN_EVERY_STEPS`, `GRPO_MIN_TRACE_BEFORE_TRAIN`
+- `REWARD_FLOOR`, `UNCERTAINTY_PENALTY_ENABLED`, `UNCERTAINTY_PENALTY_WEIGHT`
 
 ### 3. Run app
 ```bash

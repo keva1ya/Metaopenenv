@@ -4,7 +4,7 @@ Main Loan Approval Environment.
 Orchestrates the three-level agent hierarchy:
   Level 1: 8 sub-agents (rule-based)
   Level 2: 3 head agents (GPT-4o-mini)
-  Level 3: Big Brain DQN (final decision)
+  Level 3: Weighted decision engine (final decision)
 
 Supports three task levels (easy, medium, hard)
 and MORTGAGE_MODE auto-approval.
@@ -360,7 +360,7 @@ class LoanApprovalEnv:
             print(f"  Reason: {d.dissent_reason}")
 
         print(f"\n[STEP]")
-        print(f"  Big Brain Decision: {action.value}")
+        print(f"  Final Engine Decision: {action.value}")
         print(f"  Reward: {reward:.4f}")
         print(f"[END] Episode {self.episode} Complete.")
         print(f"{'=' * 60}")

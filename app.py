@@ -20,7 +20,7 @@ import json
 import os
 import sys
 import threading
-from typing import Optional
+from typing import List, Optional
 
 import gradio as gr
 import numpy as np
@@ -36,8 +36,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agents.voting import VoteResult
-from brain.big_brain import BigBrainAgent
-from brain.state_builder import PortfolioState, build_state_vector
+from brain.dynamic_weight_net import DynamicWeightDecisionEngine
+from brain.grpo_trainer import GRPOConfig, GRPOTrainerScaffold
+from brain.state_builder import PortfolioState
+from brain.trace_buffer import TraceBuffer, TraceRecord
+from brain.reward_shaper import (
+    _financial_reward,
+    _fraud_reward,
+    _policy_reward,
+)
 from env.action import LoanAction
 from env.loan_env import LoanApprovalEnv
 from env.observation import LoanObservation
@@ -47,8 +54,35 @@ from env.observation import LoanObservation
 # ═══════════════════════════════════════════════════════════════
 
 env = LoanApprovalEnv(task_level="hard", seed=42)
-brain = BigBrainAgent(state_dim=28, epsilon=0.1)
-brain.load("brain/big_brain_weights.pt")
+decision_engine = DynamicWeightDecisionEngine(
+    feature_dim=28,
+    use_neural_weights=os.getenv("DYNAMIC_WEIGHT_USE_NEURAL", "false").lower() == "true",
+)
+
+trace_buffer = TraceBuffer(
+    trace_path=os.getenv("RL_TRACE_PATH", "logs/rl_trace.jsonl"),
+    max_buffer_size=int(os.getenv("RL_TRACE_MAX_BUFFER", "2048")),
+    flush_every=int(os.getenv("RL_TRACE_FLUSH_EVERY", "32")),
+    enabled=os.getenv("RL_TRACE_ENABLED", "true").lower() == "true",
+)
+
+grpo_trainer = GRPOTrainerScaffold(
+    GRPOConfig(
+        enabled=os.getenv("GRPO_TRAIN_ENABLED", "false").lower() == "true",
+        train_every_steps=int(os.getenv("GRPO_TRAIN_EVERY_STEPS", "16")),
+        min_trace_before_train=int(os.getenv("GRPO_MIN_TRACE_BEFORE_TRAIN", "256")),
+        reward_floor=float(os.getenv("REWARD_FLOOR", "0.0")),
+        uncertainty_penalty_enabled=os.getenv(
+            "UNCERTAINTY_PENALTY_ENABLED", "false"
+        ).lower()
+        == "true",
+        uncertainty_penalty_weight=float(
+            os.getenv("UNCERTAINTY_PENALTY_WEIGHT", "0.0")
+        ),
+        reward_mode=os.getenv("REWARD_MODE", "non_negative_v1"),
+    )
+)
+trace_history: List[TraceRecord] = []
 
 current_council: Optional[VoteResult] = None
 last_override_info: str = "No overrides yet"
@@ -249,9 +283,9 @@ def process_next_applicant(
             env.portfolio.total_rejected,
             env.portfolio.total_reviewed,
             env.portfolio.avg_reward_last_10,
-            brain.steps,
-            brain.epsilon,
-            len(brain.replay_buffer),
+            len(trace_history),
+            float(grpo_trainer.last_status == "trained_placeholder"),
+            trace_buffer.pending_count(),
             last_override_info,
         )
 
@@ -259,32 +293,76 @@ def process_next_applicant(
     council = env.get_council_recommendation()
     current_council = council
 
-    # Build state and get Big Brain decision
-    state_vec = build_state_vector(obs, council, env.portfolio)
-    is_auto_action = not selected_action or selected_action == "Auto (Big Brain)"
+    is_auto_action = (
+        not selected_action
+        or selected_action == "Auto (Dynamic Weights)"
+        or selected_action == "Auto (Big Brain)"
+    )
 
     if not is_auto_action:
         action = LoanAction(selected_action)
+        decision_result = None
     else:
-        action_str = brain.decide(state_vec)
-        action = LoanAction(action_str)
+        decision_result = decision_engine.decide(
+            obs=obs,
+            council=council,
+            portfolio=env.portfolio,
+            manual_multipliers={
+                "RiskAgent": float(risk_weight),
+                "FraudAgent": float(fraud_weight),
+                "PolicyAgent": float(policy_weight),
+            },
+        )
+        action = decision_result.action
 
     # Step
     next_obs, reward, done, info = env.step(action, council_result=council)
 
-    # Train the RL agent on every action
-    if env.current_obs is not None:
-        next_council = env.get_council_recommendation()
-        next_state = build_state_vector(next_obs, next_council, env.portfolio)
-        brain.remember(state_vec, action.value, reward, next_state)
-        brain.learn()
-        brain.reward_history.append(reward)
+    if decision_result is not None:
+        reward_financial = _financial_reward(obs, action.value)
+        reward_fraud = _fraud_reward(obs, action.value)
+        reward_policy = _policy_reward(obs, action.value)
+        reward_alignment = (
+            1.0 if action.value == council.council_recommendation.value else 0.0
+        )
+        reward_total = max(
+            float(grpo_trainer.config.reward_floor),
+            float(0.4 * reward_financial + 0.4 * reward_fraud + 0.2 * reward_policy),
+        )
+
+        trace = TraceRecord(
+            episode=int(env.episode - 1),
+            final_action=action.value,
+            ground_truth_label=None,
+            reward_total=reward_total,
+            reward_confidence=float(council.confidence_average),
+            reward_alignment=reward_alignment,
+            uncertainty_cost_applied=0.0,
+            uncertainty_score=float(decision_result.uncertainty_score),
+            penalty_mode="disabled"
+            if not grpo_trainer.config.uncertainty_penalty_enabled
+            else "reserved",
+            penalty_config_version=grpo_trainer.config.reward_mode,
+            head_votes=dict(council.vote_breakdown),
+            head_confidences=dict(council.agent_confidence),
+            head_reasoning=dict(council.agent_reasoning),
+            dynamic_weights=dict(decision_result.normalized_weights),
+            weighted_action_scores=dict(decision_result.weighted_action_scores),
+            diagnostics={
+                "risk_multiplier": float(risk_weight),
+                "fraud_multiplier": float(fraud_weight),
+                "policy_multiplier": float(policy_weight),
+            },
+        )
+        trace_history.append(trace)
+        trace_buffer.push(trace)
+        grpo_trainer.maybe_train(trace_history)
 
     # Override detection
     council_rec = council.council_recommendation.value
     if action.value != council_rec:
         last_override_info = (
-            f"Episode {env.episode - 1}: Brain voted {action.value}, "
+            f"Episode {env.episode - 1}: Engine voted {action.value}, "
             f"council recommended {council_rec}"
         )
         override_text = f"⚠️ Overrode council vote ({council_rec} → {action.value})"
@@ -300,13 +378,19 @@ def process_next_applicant(
     agent_rs = council.agent_reasoning
     agent_cf = council.agent_confidence
     
-    risk_score = agent_cf.get('RiskAgent', 0.0) * risk_weight
-    fraud_score = agent_cf.get('FraudAgent', 0.0) * fraud_weight
-    policy_score = agent_cf.get('PolicyAgent', 0.0) * policy_weight
+    if decision_result is not None:
+        norm_w = decision_result.normalized_weights
+        risk_score = norm_w.get("RiskAgent", 0.0)
+        fraud_score = norm_w.get("FraudAgent", 0.0)
+        policy_score = norm_w.get("PolicyAgent", 0.0)
+    else:
+        risk_score = agent_cf.get("RiskAgent", 0.0)
+        fraud_score = agent_cf.get("FraudAgent", 0.0)
+        policy_score = agent_cf.get("PolicyAgent", 0.0)
     
-    risk_text = f"VOTE: {vote_bd.get('RiskAgent', 'N/A')} (Weighted Score: {risk_score:.1f})\nREASON: {agent_rs.get('RiskAgent', 'N/A')}"
-    fraud_text = f"VOTE: {vote_bd.get('FraudAgent', 'N/A')} (Weighted Score: {fraud_score:.1f})\nREASON: {agent_rs.get('FraudAgent', 'N/A')}"
-    policy_text = f"VOTE: {vote_bd.get('PolicyAgent', 'N/A')} (Weighted Score: {policy_score:.1f})\nREASON: {agent_rs.get('PolicyAgent', 'N/A')}"
+    risk_text = f"VOTE: {vote_bd.get('RiskAgent', 'N/A')} (Weight: {risk_score:.2f})\nREASON: {agent_rs.get('RiskAgent', 'N/A')}"
+    fraud_text = f"VOTE: {vote_bd.get('FraudAgent', 'N/A')} (Weight: {fraud_score:.2f})\nREASON: {agent_rs.get('FraudAgent', 'N/A')}"
+    policy_text = f"VOTE: {vote_bd.get('PolicyAgent', 'N/A')} (Weight: {policy_score:.2f})\nREASON: {agent_rs.get('PolicyAgent', 'N/A')}"
 
     if council.dissent_log:
         dissent_badge = f" 🔴 DISSENT: {council.dissent_log.dissenting_agent}"
@@ -314,20 +398,13 @@ def process_next_applicant(
         dissent_badge = ""
 
     brain_text = (
-        f"⚖️ BIG BRAIN FINAL DECISION: {action.value}\n"
+        f"⚖️ WEIGHTED FINAL DECISION: {action.value}\n"
         f"{override_text}\n"
-        f"Council: {council_rec} | Brain: {action.value}{dissent_badge}"
+        f"Council: {council_rec} | Engine: {action.value}{dissent_badge}"
     )
 
     reason_text = info.get("reward_output", None)
     reason_str = reason_text.reason if reason_text else "N/A"
-
-    # Portfolio fraud catch rate
-    total_decisions = (
-        env.portfolio.total_approved
-        + env.portfolio.total_rejected
-        + env.portfolio.total_reviewed
-    )
 
     return (
         financial_table,
@@ -346,9 +423,9 @@ def process_next_applicant(
         env.portfolio.total_rejected,
         env.portfolio.total_reviewed,
         env.portfolio.avg_reward_last_10,
-        brain.steps,
-        brain.epsilon,
-        len(brain.replay_buffer),
+        len(trace_history),
+        1.0 if grpo_trainer.config.enabled else 0.0,
+        trace_buffer.pending_count(),
         last_override_info,
     )
 
@@ -371,7 +448,7 @@ def export_dissent():
 def create_gradio_app() -> gr.Blocks:
     """Build the Gradio interface."""
     with gr.Blocks(
-        title="🏦 AI Loan Approval System — Big Brain v0",
+        title="🏦 AI Loan Approval System — Dynamic Weights v1",
         theme=gr.themes.Glass(),
     ) as demo:
         # ── HEADER ──────────────────────────────────────────
@@ -382,9 +459,9 @@ def create_gradio_app() -> gr.Blocks:
             )
 
         gr.Markdown(
-            "# 🏦 AI Loan Approval System — Big Brain DQN v0\n"
+            "# 🏦 AI Loan Approval System — Dynamic Weights v1\n"
             "**Three-level agent hierarchy: "
-            "Sub-Agents → Head Council → Big Brain DQN**"
+            "Sub-Agents → Head Council → Weighted Decision Engine**"
         )
 
         # ── PANEL 1: Applicant Profile ──────────────────────
@@ -441,11 +518,11 @@ def create_gradio_app() -> gr.Blocks:
                 label="🔵 Policy Agent", interactive=False, lines=4
             )
 
-        # ── PANEL 4: Big Brain Decision ─────────────────────
+        # ── PANEL 4: Weighted Engine Decision ───────────────
         gr.Markdown("---")
-        gr.Markdown("### 🧠 Big Brain Decision")
+        gr.Markdown("### 🧠 Weighted Engine Decision")
         brain_decision_box = gr.Textbox(
-            label="⚖️ BIG BRAIN FINAL DECISION",
+            label="⚖️ WEIGHTED FINAL DECISION",
             interactive=False,
             lines=3,
         )
@@ -480,18 +557,18 @@ def create_gradio_app() -> gr.Blocks:
                 interactive=False,
             )
 
-        # ── PANEL 7: Big Brain Status ───────────────────────
+        # ── PANEL 7: Runtime Status ─────────────────────────
         gr.Markdown("---")
-        gr.Markdown("### 🤖 Big Brain Status")
+        gr.Markdown("### 🤖 Runtime Status")
         with gr.Row():
             steps_box = gr.Number(
-                label="🎓 Training Steps", interactive=False
+                label="🧾 Trace Count", interactive=False
             )
             epsilon_box = gr.Number(
-                label="🎲 Epsilon", interactive=False
+                label="🧪 GRPO Enabled (0/1)", interactive=False
             )
             buffer_box = gr.Number(
-                label="💾 Replay Buffer", interactive=False
+                label="💾 Trace Buffer Pending", interactive=False
             )
             override_box = gr.Textbox(
                 label="⚡ Last Override", interactive=False
@@ -541,12 +618,12 @@ def create_gradio_app() -> gr.Blocks:
         with gr.Row():
             action_radio = gr.Radio(
                 choices=[
-                    "Auto (Big Brain)",
+                    "Auto (Dynamic Weights)",
                     "APPROVE",
                     "REJECT",
                     "REQUEST_MORE_INFO",
                 ],
-                value="Auto (Big Brain)",
+                value="Auto (Dynamic Weights)",
                 label="Action Selection",
             )
         with gr.Row():
