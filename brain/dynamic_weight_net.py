@@ -1,7 +1,7 @@
 """
 Dynamic weighting engine for final loan decisions.
 
-This module replaces the BigBrain DQN decision path with a
+This module implements the final weighted decision path as a
 Mixture-of-Experts style combiner:
   - Risk head agent
   - Fraud head agent

@@ -1,9 +1,9 @@
 """
-State Builder for Big Brain DQN.
+State builder for the weighted decision engine.
 
 Converts the raw observation, council vote result, and
 portfolio health into a normalized 28-dimensional float32
-state vector for the DQN.
+state vector for the final decision layer.
 
 Dimensions:
   [0-13]  14 financial features (normalized)
@@ -69,7 +69,7 @@ def build_state_vector(
 ) -> np.ndarray:
     """
     Build a 28-dimensional normalized state vector
-    for the Big Brain DQN.
+    for the final decision engine.
 
     All values are normalized to approximately [0, 1].
     """

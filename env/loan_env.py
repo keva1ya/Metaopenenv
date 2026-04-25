@@ -2,7 +2,7 @@
 Main Loan Approval Environment.
 
 Orchestrates the three-level agent hierarchy:
-  Level 1: 8 sub-agents (rule-based)
+  Level 1: 9 sub-agents (rule-based)
   Level 2: 3 head agents (GPT-4o-mini)
   Level 3: Weighted decision engine (final decision)
 
@@ -20,6 +20,7 @@ from agents.council.fraud_agent import FraudAgent
 from agents.council.policy_agent import PolicyAgent
 from agents.council.risk_agent import RiskAgent
 from agents.sub_agents.fraud.consistency_checker import ConsistencyCheckerAgent
+from agents.sub_agents.fraud.identity_verifier import IdentityVerifierAgent
 from agents.sub_agents.fraud.pattern_checker import PatternCheckerAgent
 from agents.sub_agents.policy.compliance_officer import ComplianceOfficerAgent
 from agents.sub_agents.policy.ltv_checker import LTVCheckerAgent
@@ -108,6 +109,7 @@ class LoanApprovalEnv:
         self.debt_analyzer = DebtAnalyzerAgent()
         self.pattern_checker = PatternCheckerAgent()
         self.consistency_checker = ConsistencyCheckerAgent()
+        self.identity_verifier = IdentityVerifierAgent()
         self.compliance_officer = ComplianceOfficerAgent()
         self.term_validator = TermValidatorAgent()
         self.ltv_checker = LTVCheckerAgent()
@@ -145,19 +147,20 @@ class LoanApprovalEnv:
 
         obs = self.current_obs
 
-        # Level 1: Run all 8 sub-agents
+        # Level 1: Run all 9 sub-agents
         credit_r = self.credit_analyst.analyze(obs)
         income_r = self.income_verifier.analyze(obs)
         debt_r = self.debt_analyzer.analyze(obs)
         pattern_r = self.pattern_checker.analyze(obs)
         consistency_r = self.consistency_checker.analyze(obs)
+        identity_r = self.identity_verifier.analyze(obs)
         compliance_r = self.compliance_officer.analyze(obs)
         term_r = self.term_validator.analyze(obs)
         ltv_r = self.ltv_checker.analyze(obs)
 
         all_sub_reports = [
             credit_r, income_r, debt_r,
-            pattern_r, consistency_r,
+            pattern_r, consistency_r, identity_r,
             compliance_r, term_r, ltv_r,
         ]
 
@@ -166,7 +169,7 @@ class LoanApprovalEnv:
             obs, [credit_r, income_r, debt_r], self.dissent_context
         )
         fraud_vote = self.fraud_agent.evaluate(
-            obs, [pattern_r, consistency_r], self.dissent_context
+            obs, [pattern_r, consistency_r, identity_r], self.dissent_context
         )
         policy_vote = self.policy_agent.evaluate(
             obs, [compliance_r, term_r, ltv_r], self.dissent_context

@@ -3,7 +3,7 @@ version: "1.0"
 description: >
   Three-level multi-agent loan approval system.
   Sub-agents feed head agents who vote.
-  Big Brain DQN makes final decision.
+  A weighted decision engine makes the final decision.
   Trained via reinforcement learning with dissent feedback.
 
 tasks: [easy, medium, hard]
@@ -11,7 +11,7 @@ modes: [normal, mortgage_mode]
 action_space: [APPROVE, REJECT, REQUEST_MORE_INFO]
 
 brain:
-  type: DQN
+  type: weighted_moe
   state_dim: 28
   action_dim: 3
   training: GRPO_compatible

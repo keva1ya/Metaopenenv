@@ -11,7 +11,7 @@ pinned: false
 # AI Loan Approval System
 ## Overview
 A three-level loan decision engine built for Hugging Face Spaces:
-- Level 1: 8 deterministic sub-agents (risk, fraud, policy)
+- Level 1: 9 deterministic sub-agents including bank-KYC coverage in fraud
 - Level 2: 3 head agents (Powered by OpenRouter LLMs with deterministic fallback)
 - Level 3: Dynamic weighted final decision engine
 

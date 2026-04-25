@@ -3,8 +3,8 @@ Voting Engine for the Head Agent Council.
 
 Aggregates votes from RiskAgent, FraudAgent, PolicyAgent.
 Detects dissent and logs it to logs/dissent_log.json.
-Returns a VoteResult which is a RECOMMENDATION to Big Brain,
-NOT the final decision.
+Returns a VoteResult which is a recommendation to the final
+weighted decision engine, not the final decision.
 """
 
 import json
@@ -33,7 +33,8 @@ class DissentLog(BaseModel):
 class VoteResult(BaseModel):
     """
     Result of the council voting process.
-    This is a RECOMMENDATION to Big Brain, not the final decision.
+    This is a recommendation to the final weighted engine, not the
+    final decision.
     """
 
     council_recommendation: LoanAction

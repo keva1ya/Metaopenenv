@@ -39,7 +39,7 @@ This document is the canonical implementation and maintenance guide for this rep
 2. Sub-agent evaluations
 3. Head-agent council vote
 4. Voting aggregation and dissent handling
-5. Big Brain decision and reward path
+5. Weighted final decision and reward path
 
 ### Fallback mode
 If any of the three keys are missing, head agents run deterministic fallback logic.

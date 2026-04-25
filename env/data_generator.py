@@ -22,7 +22,7 @@ class SyntheticDataGenerator:
 
     def generate(self) -> LoanObservation:
         """
-        Generate one complete LoanObservation with all 17 fields.
+        Generate one complete LoanObservation with all 18 fields.
 
         Correlations implemented:
           1. spending_volatility increases for low-income + high-loan
@@ -74,6 +74,22 @@ class SyntheticDataGenerator:
             application_consistency_base = max(0.0, application_consistency_base - 0.2)
         application_consistency = application_consistency_base
 
+        # Bank KYC status: simple operational verification signal
+        if application_consistency < 0.2:
+            bank_kyc_status = "FAILED"
+        elif application_consistency < 0.45:
+            bank_kyc_status = (
+                "FAILED" if self.rng.random() < 0.35 else "PENDING"
+            )
+        elif previous_defaults >= 3 and loan_purpose_clarity < 0.3:
+            bank_kyc_status = (
+                "FAILED" if self.rng.random() < 0.4 else "PENDING"
+            )
+        else:
+            bank_kyc_status = (
+                "VERIFIED" if self.rng.random() < 0.8 else "PENDING"
+            )
+
         return LoanObservation(
             income=income,
             credit_score=credit_score,
@@ -92,4 +108,5 @@ class SyntheticDataGenerator:
             spending_volatility=spending_volatility,
             loan_purpose_clarity=loan_purpose_clarity,
             application_consistency=application_consistency,
+            bank_kyc_status=bank_kyc_status,
         )

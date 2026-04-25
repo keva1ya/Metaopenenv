@@ -9,10 +9,10 @@ Features:
   - Applicant profile display (financial + behavioral)
   - Sub-agent report panels with accordion drill-down
   - Council vote visualization with dissent badges
-  - Big Brain final decision with override detection
+  - Weighted final decision with override detection
   - Dissent log viewer
   - Portfolio health dashboard
-  - Big Brain training status
+  - Weighted-engine trace training status
   - Demo mode banner when API keys not available
 """
 
@@ -163,7 +163,7 @@ def api_health():
 
 def run_api():
     """Run FastAPI server in a daemon thread."""
-    uvicorn.run(api, host="0.0.0.0", port=8000, log_level="warning")
+    uvicorn.run(api, host="127.0.0.1", port=8000, log_level="warning")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -197,6 +197,7 @@ def format_behavioral_table(obs: LoanObservation) -> list:
         ["Spending Volatility", f"{obs.spending_volatility:.3f}"],
         ["Loan Purpose Clarity", f"{obs.loan_purpose_clarity:.3f}"],
         ["Application Consistency", f"{obs.application_consistency:.3f}"],
+        ["Bank KYC Status", obs.bank_kyc_status],
     ]
 
 
@@ -215,7 +216,7 @@ def format_sub_reports(council: VoteResult) -> tuple:
         ]
         if r.agent_name in ["CreditAnalyst", "IncomeVerifier", "DebtAnalyzer"]:
             risk_rows.append(row)
-        elif r.agent_name in ["PatternChecker", "ConsistencyChecker"]:
+        elif r.agent_name in ["PatternChecker", "ConsistencyChecker", "KYCVerifier"]:
             fraud_rows.append(row)
         else:
             policy_rows.append(row)
@@ -296,7 +297,6 @@ def process_next_applicant(
     is_auto_action = (
         not selected_action
         or selected_action == "Auto (Dynamic Weights)"
-        or selected_action == "Auto (Big Brain)"
     )
 
     if not is_auto_action:
@@ -706,11 +706,11 @@ if __name__ == "__main__":
     # Start FastAPI in daemon thread
     api_thread = threading.Thread(target=run_api, daemon=True)
     api_thread.start()
-    print("FastAPI running on http://0.0.0.0:8000")
+    print("FastAPI running on http://127.0.0.1:8000")
 
     # Start Gradio
     demo.launch(
-        server_name="0.0.0.0",
+        server_name="127.0.0.1",
         server_port=7860,
         share=False,
     )

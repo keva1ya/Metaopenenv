@@ -1,5 +1,5 @@
 """
-Reward Shaper for Big Brain training.
+Reward shaper for weighted-decision trace training.
 
 Four independent reward components combined:
   r1: Financial reward   (weight 0.4)
@@ -24,7 +24,7 @@ def calculate_shaped_reward(
     task_level: str,
 ) -> float:
     """
-    Calculate multi-component shaped reward for the Big Brain.
+    Calculate multi-component shaped reward for the final decision layer.
 
     Hard overrides are checked first and return immediately.
     Then three weighted components are combined and clipped.

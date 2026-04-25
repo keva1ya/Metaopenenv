@@ -9,6 +9,8 @@ RULE: Behavioral fields → FraudAgent only.
 This separation is enforced by prompt content in head agents.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -18,7 +20,7 @@ class LoanObservation(BaseModel):
 
     Financial Fields (14):
         Used by RiskAgent and PolicyAgent sub-agents/heads.
-    Behavioral Fields (3):
+    Behavioral and KYC Fields (4):
         Used by FraudAgent sub-agents/heads only.
     """
 
@@ -44,3 +46,6 @@ class LoanObservation(BaseModel):
     spending_volatility: float = Field(ge=0.0, le=1.0, description="Variance in spending patterns")
     loan_purpose_clarity: float = Field(ge=0.0, le=1.0, description="Clarity of stated loan purpose")
     application_consistency: float = Field(ge=0.0, le=1.0, description="Consistency across application fields")
+    bank_kyc_status: Literal["VERIFIED", "PENDING", "FAILED"] = Field(
+        description="Whether bank KYC verification is verified, pending, or failed"
+    )

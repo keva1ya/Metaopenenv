@@ -1,15 +1,15 @@
 """
-Fraud Agent — Head Agent (Level 2).
+Fraud Agent - Head Agent (Level 2).
 
-Chief Fraud Officer. Uses GPT-4o-mini.
-Consumes: PatternChecker + ConsistencyChecker reports.
-Prompt receives: behavioral fields ONLY.
-Income/employment only used for inconsistency context.
+Chief Fraud Officer. Uses GPT-style synthesis through OpenRouter.
+Consumes: PatternChecker + ConsistencyChecker + KYCVerifier reports.
+Prompt receives behavioral fields plus limited context features.
 
-Strong fraud signal (fraud_score>=2 or consistency<0.3)
-forces a REJECT vote.
-
-On ANY exception: falls back to rule-based decision.
+Explicit safeguards:
+- Bank KYC failed => hard REJECT veto
+- Bank KYC pending + additional fraud signals => likely identity/fraud
+  escalation and hard REJECT
+- Bank KYC pending alone => REQUEST_MORE_INFO / human verification
 """
 
 import re
@@ -26,19 +26,27 @@ from env.observation import LoanObservation
 class FraudAgent:
     """
     Chief Fraud Officer head agent.
-    Synthesizes reports from 2 fraud sub-agents using GPT-4o-mini.
-    Falls back to rule-based scoring on any failure.
+    Synthesizes reports from fraud sub-agents using an LLM, with
+    explicit post-check guards for identity-fraud veto behavior.
     """
 
     SYSTEM_MESSAGE = (
         "You are the Chief Fraud Officer.\n"
-        "Evaluate ONLY behavioral and fraud signals.\n"
-        "Never evaluate financial capacity.\n"
-        "Strong fraud signal (fraud_score>=2 or consistency<0.3) "
-        "means you MUST vote REJECT."
+        "Evaluate only behavioral and fraud signals.\n"
+        "Never evaluate financial capacity as credit risk.\n"
+        "KYCVerifier reports the bank-owned KYC status.\n"
+        "If bank KYC failed, you must vote REJECT.\n"
+        "If bank KYC is pending but not failed, prefer "
+        "REQUEST_MORE_INFO for human verification.\n"
+        "If pending KYC appears together with other fraud indicators, "
+        "treat it as likely identity/fraud escalation and vote REJECT."
     )
 
-    def __init__(self, client: Optional[OpenAI] = None, model_name: str = "z-ai/glm-4.5-air:free"):
+    def __init__(
+        self,
+        client: Optional[OpenAI] = None,
+        model_name: str = "z-ai/glm-4.5-air:free",
+    ):
         self.client = client
         self.model_name = model_name
 
@@ -50,20 +58,24 @@ class FraudAgent:
     ) -> HeadAgentVote:
         """
         Synthesize fraud sub-agent reports into a single vote.
-        Uses GPT-4o-mini with rule-based fallback.
+        Uses the configured LLM with deterministic guardrails and fallback.
         """
+        identity_status = self._extract_identity_status(sub_reports)
+        fraud_score = self._extract_pattern_fraud_score(sub_reports)
+        consistency = obs.application_consistency
+        consistency_flags = self._consistency_flag_count(sub_reports)
+
         try:
             if self.client is None:
                 raise ValueError("No OpenRouter client configured")
 
             report_lines = []
-            for r in sub_reports:
+            for report in sub_reports:
                 report_lines.append(
-                    f"{r.agent_name.upper()}: rec={r.recommendation} "
-                    f"conf={r.confidence:.2f} flags={r.key_flags}"
+                    f"{report.agent_name.upper()}: rec={report.recommendation} "
+                    f"conf={report.confidence:.2f} flags={report.key_flags}"
                 )
 
-            # Behavioral fields only (income/employment only for context)
             user_prompt = (
                 f"Sub-agent reports:\n"
                 f"{'\n'.join(report_lines)}\n\n"
@@ -71,8 +83,13 @@ class FraudAgent:
                 f"  Spending Volatility: {obs.spending_volatility:.2f}\n"
                 f"  Loan Purpose Clarity: {obs.loan_purpose_clarity:.2f}\n"
                 f"  Application Consistency: {obs.application_consistency:.2f}\n"
+                f"  Previous Defaults: {obs.previous_defaults}\n"
                 f"  Income (context only): {obs.income:.0f}\n"
                 f"  Employment (context only): {obs.employment_years}yr\n\n"
+                f"Identity/KYC guidance:\n"
+                f"  Bank KYC status: {identity_status}\n"
+                f"  Pattern fraud score: {fraud_score}\n"
+                f"  Consistency flag count: {consistency_flags}\n\n"
                 f"DISSENT HISTORY: {dissent_context}\n\n"
                 f"Respond ONLY:\n"
                 f"DECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\n"
@@ -87,11 +104,20 @@ class FraudAgent:
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.3,
-                max_tokens=200,
+                max_tokens=220,
             )
 
             text = response.choices[0].message.content.strip()
             decision, confidence, reasoning = self._parse_response(text)
+            decision, confidence, reasoning = self._apply_identity_guards(
+                decision=decision,
+                confidence=confidence,
+                reasoning=reasoning,
+                identity_status=identity_status,
+                fraud_score=fraud_score,
+                consistency=consistency,
+                consistency_flags=consistency_flags,
+            )
 
             return HeadAgentVote(
                 agent_name="FraudAgent",
@@ -102,7 +128,13 @@ class FraudAgent:
             )
 
         except Exception:
-            return self._fallback(obs, sub_reports)
+            return self._fallback(
+                obs=obs,
+                sub_reports=sub_reports,
+                identity_status=identity_status,
+                fraud_score=fraud_score,
+                consistency_flags=consistency_flags,
+            )
 
     def _parse_response(self, text: str):
         """Parse the structured LLM response."""
@@ -111,43 +143,133 @@ class FraudAgent:
         reasoning = text
 
         dec_match = re.search(
-            r"DECISION[^\w]*(APPROVE|REJECT|REQUEST_MORE_INFO)", text, re.IGNORECASE
+            r"DECISION[^\w]*(APPROVE|REJECT|REQUEST_MORE_INFO)",
+            text,
+            re.IGNORECASE,
         )
         if dec_match:
             decision = LoanAction(dec_match.group(1).upper())
 
-        conf_match = re.search(r"CONFIDENCE[^\w]*([0-9.]+)(%?)", text, re.IGNORECASE)
+        conf_match = re.search(
+            r"CONFIDENCE[^\w]*([0-9.]+)(%?)",
+            text,
+            re.IGNORECASE,
+        )
         if conf_match:
-            val = float(conf_match.group(1))
+            value = float(conf_match.group(1))
             is_percent = conf_match.group(2) == "%"
-            if is_percent or val > 1.0:
-                val = val / 100.0
-            confidence = max(0.0, min(1.0, val))
+            if is_percent or value > 1.0:
+                value = value / 100.0
+            confidence = max(0.0, min(1.0, value))
 
-        reason_match = re.search(r"REASONING[^\w]*(.+)", text, re.IGNORECASE | re.DOTALL)
+        reason_match = re.search(
+            r"REASONING[^\w]*(.+)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
         if reason_match:
             reasoning = reason_match.group(1).strip()
 
         return decision, confidence, reasoning
 
-    def _fallback(
-        self, obs: LoanObservation, sub_reports: List[SubAgentReport]
-    ) -> HeadAgentVote:
-        """Rule-based fallback when LLM call fails."""
-        # Extract fraud_score from pattern checker flags
+    def _extract_pattern_fraud_score(self, sub_reports: List[SubAgentReport]) -> int:
         fraud_score = 0
-        for r in sub_reports:
-            if r.agent_name == "PatternChecker":
-                for flag in r.key_flags:
-                    if "fraud_score:" in flag:
-                        try:
-                            fraud_score = int(
-                                flag.split(":")[1].split("/")[0].strip()
-                            )
-                        except (ValueError, IndexError):
-                            pass
+        for report in sub_reports:
+            if report.agent_name != "PatternChecker":
+                continue
+            for flag in report.key_flags:
+                if "fraud_score:" not in flag:
+                    continue
+                try:
+                    fraud_score = int(flag.split(":")[1].split("/")[0].strip())
+                except (ValueError, IndexError):
+                    fraud_score = 0
+        return fraud_score
 
+    def _extract_identity_status(self, sub_reports: List[SubAgentReport]) -> str:
+        for report in sub_reports:
+            if report.agent_name != "KYCVerifier":
+                continue
+            if report.recommendation == "REJECT":
+                return "FAILED"
+            if report.recommendation == "REVIEW":
+                return "PENDING"
+            return "VERIFIED"
+        return "UNKNOWN"
+
+    def _consistency_flag_count(self, sub_reports: List[SubAgentReport]) -> int:
+        for report in sub_reports:
+            if report.agent_name == "ConsistencyChecker":
+                return len(report.key_flags)
+        return 0
+
+    def _apply_identity_guards(
+        self,
+        decision: LoanAction,
+        confidence: float,
+        reasoning: str,
+        identity_status: str,
+        fraud_score: int,
+        consistency: float,
+        consistency_flags: int,
+    ):
+        extra_fraud_signal = (
+            fraud_score >= 1 or consistency < 0.5 or consistency_flags >= 1
+        )
+
+        if identity_status == "FAILED":
+            return (
+                LoanAction.REJECT,
+                max(confidence, 0.95),
+                "KYCVerifier triggered a hard fraud veto because bank KYC failed.",
+            )
+
+        if identity_status == "PENDING" and extra_fraud_signal:
+            return (
+                LoanAction.REJECT,
+                max(confidence, 0.9),
+                "Pending bank KYC combined with additional fraud signals was "
+                "treated as a likely fraud escalation, triggering a hard veto.",
+            )
+
+        if identity_status == "PENDING":
+            return (
+                LoanAction.REQUEST_MORE_INFO,
+                max(confidence, 0.75),
+                "Pending bank KYC requires human verification "
+                "before clearing the application on fraud grounds.",
+            )
+
+        return decision, confidence, reasoning
+
+    def _fallback(
+        self,
+        obs: LoanObservation,
+        sub_reports: List[SubAgentReport],
+        identity_status: str,
+        fraud_score: int,
+        consistency_flags: int,
+    ) -> HeadAgentVote:
+        """Deterministic fallback with identity-veto safeguards."""
         consistency = obs.application_consistency
+        decision, confidence, reasoning = self._apply_identity_guards(
+            decision=LoanAction.APPROVE,
+            confidence=0.8,
+            reasoning="Fallback: defaulting to no major fraud concern.",
+            identity_status=identity_status,
+            fraud_score=fraud_score,
+            consistency=consistency,
+            consistency_flags=consistency_flags,
+        )
+
+        if decision != LoanAction.APPROVE:
+            return HeadAgentVote(
+                agent_name="FraudAgent",
+                decision=decision,
+                reasoning=reasoning,
+                confidence=confidence,
+                sub_agent_reports=sub_reports,
+            )
 
         if fraud_score >= 2 or consistency < 0.3:
             decision = LoanAction.REJECT
@@ -156,12 +278,12 @@ class FraudAgent:
                 f"Fallback: Strong fraud signal. "
                 f"fraud_score={fraud_score}, consistency={consistency:.2f}."
             )
-        elif fraud_score == 1:
+        elif fraud_score == 1 or consistency_flags >= 1:
             decision = LoanAction.REQUEST_MORE_INFO
             confidence = 0.65
             reasoning = (
-                f"Fallback: Moderate fraud signal. "
-                f"fraud_score={fraud_score}. Requesting more info."
+                "Fallback: Moderate fraud signal or inconsistency concern. "
+                f"fraud_score={fraud_score}, consistency_flags={consistency_flags}."
             )
         else:
             decision = LoanAction.APPROVE
