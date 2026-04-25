@@ -38,6 +38,7 @@ class VoteResult(BaseModel):
 
     council_recommendation: LoanAction
     vote_breakdown: Dict[str, str]
+    agent_reasoning: Dict[str, str] = Field(default_factory=dict)
     was_unanimous: bool
     dissent_log: Optional[DissentLog] = None
     confidence_average: float
@@ -62,10 +63,12 @@ class VotingEngine:
         Majority determines council_recommendation.
         3-way tie: PolicyAgent breaks tie.
         """
-        # Build vote breakdown
+        # Build vote breakdown and reasoning
         vote_breakdown: Dict[str, str] = {}
+        agent_reasoning: Dict[str, str] = {}
         for v in votes:
             vote_breakdown[v.agent_name] = v.decision.value
+            agent_reasoning[v.agent_name] = v.reasoning
 
         # Count votes
         tally: Dict[str, int] = {}
@@ -124,6 +127,7 @@ class VotingEngine:
         return VoteResult(
             council_recommendation=council_recommendation,
             vote_breakdown=vote_breakdown,
+            agent_reasoning=agent_reasoning,
             was_unanimous=was_unanimous,
             dissent_log=dissent_log_entry,
             confidence_average=confidence_average,

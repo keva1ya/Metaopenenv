@@ -289,9 +289,10 @@ def process_next_applicant(selected_action: str, risk_model: str, fraud_model: s
     risk_rows, fraud_rows, policy_rows = format_sub_reports(council)
 
     vote_bd = council.vote_breakdown
-    risk_text = f"{vote_bd.get('RiskAgent', 'N/A')} ({council.confidence_average:.0%})"
-    fraud_text = f"{vote_bd.get('FraudAgent', 'N/A')} ({council.confidence_average:.0%})"
-    policy_text = f"{vote_bd.get('PolicyAgent', 'N/A')} ({council.confidence_average:.0%})"
+    agent_rs = council.agent_reasoning
+    risk_text = f"VOTE: {vote_bd.get('RiskAgent', 'N/A')} ({council.confidence_average:.0%})\nREASON: {agent_rs.get('RiskAgent', 'N/A')}"
+    fraud_text = f"VOTE: {vote_bd.get('FraudAgent', 'N/A')} ({council.confidence_average:.0%})\nREASON: {agent_rs.get('FraudAgent', 'N/A')}"
+    policy_text = f"VOTE: {vote_bd.get('PolicyAgent', 'N/A')} ({council.confidence_average:.0%})\nREASON: {agent_rs.get('PolicyAgent', 'N/A')}"
 
     if council.dissent_log:
         dissent_badge = f" 🔴 DISSENT: {council.dissent_log.dissenting_agent}"
@@ -417,13 +418,13 @@ def create_gradio_app() -> gr.Blocks:
         gr.Markdown("### 🗳️ Council Vote")
         with gr.Row():
             risk_vote_box = gr.Textbox(
-                label="🔴 Risk Agent", interactive=False
+                label="🔴 Risk Agent", interactive=False, lines=4
             )
             fraud_vote_box = gr.Textbox(
-                label="🟡 Fraud Agent", interactive=False
+                label="🟡 Fraud Agent", interactive=False, lines=4
             )
             policy_vote_box = gr.Textbox(
-                label="🔵 Policy Agent", interactive=False
+                label="🔵 Policy Agent", interactive=False, lines=4
             )
 
         # ── PANEL 4: Big Brain Decision ─────────────────────
