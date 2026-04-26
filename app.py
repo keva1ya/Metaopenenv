@@ -464,6 +464,79 @@ def process_next_applicant(
     )
 
 
+def show_processing_skeleton():
+    """Fill the full dashboard with a polished skeleton state during processing."""
+    financial_skeleton = [
+        ["Applicant Profile", "Generating secured borrower snapshot"],
+        ["Income", "████████████ calculating"],
+        ["Credit Score", "██████ validating bureau signal"],
+        ["Loan Amount", "████████ underwriting request"],
+        ["Collateral", "████████ checking mortgage cover"],
+        ["Existing Debt", "██████ measuring obligations"],
+        ["Age / Term", "████ policy window scan"],
+    ]
+    behavioral_skeleton = [
+        ["Spending Volatility", "████████ pattern loading"],
+        ["Purpose Clarity", "██████ intent extraction"],
+        ["Application Consistency", "████████ cross-checking"],
+        ["Bank KYC Status", "████ identity verification"],
+    ]
+    risk_skeleton = [
+        ["CreditAnalyst", "SCANNING", "--", "Bureau, score, repayment capacity"],
+        ["IncomeVerifier", "SCANNING", "--", "Income stability and affordability"],
+        ["DebtAnalyzer", "SCANNING", "--", "Debt load and repayment pressure"],
+    ]
+    fraud_skeleton = [
+        ["PatternChecker", "SCANNING", "--", "Velocity and anomaly profile"],
+        ["ConsistencyChecker", "SCANNING", "--", "Application field consistency"],
+        ["IdentityVerifier", "SCANNING", "--", "KYC and identity confidence"],
+    ]
+    policy_skeleton = [
+        ["ComplianceOfficer", "SCANNING", "--", "Bank policy constraints"],
+        ["TermValidator", "SCANNING", "--", "Age plus tenure validation"],
+        ["LTVChecker", "SCANNING", "--", "Loan-to-value coverage"],
+    ]
+    council_text = (
+        "UNDERWRITING IN PROGRESS\n"
+        "Signal packet received. Agent reasoning is being synthesized.\n"
+        "Confidence, flags, and dissent will appear here."
+    )
+    brain_text = (
+        "WEIGHTED ENGINE ACTIVE\n"
+        "Combining risk, fraud, policy, and portfolio context.\n"
+        "Final action pending."
+    )
+    dissent_skeleton = [
+        {
+            "stage": "processing",
+            "message": "Council votes are being compared for dissent.",
+        }
+    ]
+
+    return (
+        financial_skeleton,
+        behavioral_skeleton,
+        risk_skeleton,
+        fraud_skeleton,
+        policy_skeleton,
+        council_text,
+        council_text,
+        council_text,
+        brain_text,
+        0.0,
+        "Reward explanation pending while the full loan decision pipeline runs.",
+        dissent_skeleton,
+        env.portfolio.total_approved,
+        env.portfolio.total_rejected,
+        env.portfolio.total_reviewed,
+        env.portfolio.avg_reward_last_10,
+        len(trace_history),
+        1.0 if grpo_trainer.config.enabled else 0.0,
+        trace_buffer.pending_count(),
+        "Processing current applicant...",
+    )
+
+
 def reset_portfolio():
     """Reset portfolio state."""
     env.portfolio = PortfolioState()
@@ -893,7 +966,35 @@ def create_gradio_app() -> gr.Blocks:
 
         # ── WIRING ──────────────────────────────────────────
 
-        next_btn.click(
+        next_flow = next_btn.click(
+            fn=show_processing_skeleton,
+            inputs=[],
+            outputs=[
+                financial_df,
+                behavioral_df,
+                risk_sub_df,
+                fraud_sub_df,
+                policy_sub_df,
+                risk_vote_box,
+                fraud_vote_box,
+                policy_vote_box,
+                brain_decision_box,
+                reward_box,
+                reason_box,
+                dissent_json,
+                approved_box,
+                rejected_box,
+                reviewed_box,
+                avg_reward_box,
+                steps_box,
+                epsilon_box,
+                buffer_box,
+                override_box,
+            ],
+            queue=False,
+        )
+
+        next_flow.then(
             fn=process_next_applicant,
             inputs=[
                 action_radio, 
