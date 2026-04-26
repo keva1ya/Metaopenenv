@@ -1,7 +1,7 @@
 """
 Fraud Agent - Head Agent (Level 2).
 
-Chief Fraud Officer. Uses GPT-style synthesis through OpenRouter.
+Chief Fraud Officer. Uses HuggingFace Inference API with keva1ya/qwen-2.5-fraud.
 Consumes: PatternChecker + ConsistencyChecker + KYCVerifier reports.
 Prompt receives behavioral fields plus limited context features.
 
@@ -12,11 +12,9 @@ Explicit safeguards:
 - Bank KYC pending alone => REQUEST_MORE_INFO / human verification
 """
 
-import os
 import re
+import requests
 from typing import List, Optional
-
-from openai import OpenAI
 
 from agents.council.risk_agent import HeadAgentVote
 from agents.sub_agents.risk.credit_analyst import SubAgentReport
@@ -27,50 +25,12 @@ from env.observation import LoanObservation
 class FraudAgent:
     """
     Chief Fraud Officer head agent.
-    Synthesizes reports from fraud sub-agents using an LLM, with
+    Synthesizes reports from fraud sub-agents using HuggingFace API, with
     explicit post-check guards for identity-fraud veto behavior.
     """
 
-    SYSTEM_MESSAGE = (
-        "You are the Chief Fraud Officer.\n"
-        "Evaluate only behavioral and fraud signals.\n"
-        "Never evaluate financial capacity as credit risk.\n"
-        "KYCVerifier reports the bank-owned KYC status.\n"
-        "If bank KYC failed, you must vote REJECT.\n"
-        "If bank KYC is pending but not failed, prefer "
-        "REQUEST_MORE_INFO for human verification.\n"
-        "If pending KYC appears together with other fraud indicators, "
-        "treat it as likely identity/fraud escalation and vote REJECT."
-    )
-
-    def __init__(
-        self,
-        client: Optional[OpenAI] = None,
-        model_name: str = "openrouter/auto",
-    ):
-        self.client = client
-        self.model_name = model_name
-
-    def _complete_with_fallback(self, messages: list, temperature: float, max_tokens: int):
-        """Try primary model, then fallback model if configured."""
-        fallback_model = os.getenv("OPENROUTER_FALLBACK_MODEL", "openrouter/auto")
-        candidates = [self.model_name]
-        if fallback_model and fallback_model not in candidates:
-            candidates.append(fallback_model)
-
-        last_exc = None
-        for model in candidates:
-            try:
-                return self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-            except Exception as exc:
-                last_exc = exc
-                continue
-        raise last_exc if last_exc is not None else RuntimeError("No model candidates configured")
+    def __init__(self, client=None, model_name=None):
+        pass
 
     def evaluate(
         self,
@@ -80,7 +40,7 @@ class FraudAgent:
     ) -> HeadAgentVote:
         """
         Synthesize fraud sub-agent reports into a single vote.
-        Uses the configured LLM with deterministic guardrails and fallback.
+        Uses the configured HF API with deterministic guardrails and fallback.
         """
         identity_status = self._extract_identity_status(sub_reports)
         fraud_score = self._extract_pattern_fraud_score(sub_reports)
@@ -88,8 +48,10 @@ class FraudAgent:
         consistency_flags = self._consistency_flag_count(sub_reports)
 
         try:
-            if self.client is None:
-                raise ValueError("No OpenRouter client configured")
+            API_URL = "https://api-inference.huggingface.co/models/keva1ya/qwen-2.5-fraud"
+            headers = {
+                "Authorization": "Bearer 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"
+            }
 
             report_lines = []
             for report in sub_reports:
@@ -98,43 +60,45 @@ class FraudAgent:
                     f"conf={report.confidence:.2f} flags={report.key_flags}"
                 )
 
-            user_prompt = (
-                f"<sub_agent_reports>\n"
-                f"{'\n'.join(report_lines)}\n"
-                f"</sub_agent_reports>\n\n"
-                f"<applicant_data>\n"
-                f"  Spending Volatility: {obs.spending_volatility:.2f}\n"
-                f"  Loan Purpose Clarity: {obs.loan_purpose_clarity:.2f}\n"
-                f"  Application Consistency: {obs.application_consistency:.2f}\n"
-                f"  Previous Defaults: {obs.previous_defaults}\n"
-                f"  Income (context only): {obs.income:.0f}\n"
-                f"  Employment (context only): {obs.employment_years}yr\n"
-                f"</applicant_data>\n\n"
-                f"<identity_guidance>\n"
-                f"  Bank KYC status: {identity_status}\n"
-                f"  Pattern fraud score: {fraud_score}\n"
-                f"  Consistency flag count: {consistency_flags}\n"
-                f"</identity_guidance>\n\n"
-                f"<dissent_history>\n"
-                f"{dissent_context}\n"
-                f"</dissent_history>\n\n"
-                f"Respond ONLY:\n"
-                f"DECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\n"
-                f"CONFIDENCE: <0.0-1.0>\n"
-                f"REASONING: <2 sentences>"
+            prompt_content = (
+                f"Evaluate only behavioral and fraud signals. Never evaluate financial capacity as credit risk.\n"
+                f"KYCVerifier reports the bank-owned KYC status.\n\n"
+                f"Sub-Agent Reports:\n{chr(10).join(report_lines)}\n\n"
+                f"Applicant Behavioral Data:\n"
+                f"Spending Volatility: {obs.spending_volatility:.2f}\n"
+                f"Loan Purpose Clarity: {obs.loan_purpose_clarity:.2f}\n"
+                f"Application Consistency: {obs.application_consistency:.2f}\n"
+                f"Previous Defaults: {obs.previous_defaults}\n"
+                f"Income (context only): {obs.income:.0f}\n"
+                f"Employment (context only): {obs.employment_years}yr\n\n"
+                f"Identity Guidance:\n"
+                f"Bank KYC status: {identity_status}\n"
+                f"Pattern fraud score: {fraud_score}\n"
+                f"Consistency flag count: {consistency_flags}\n\n"
+                f"Respond ONLY with:\nDECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\nCONFIDENCE: <0.0-1.0>\nREASONING: <2 sentences>"
             )
 
-            response = self._complete_with_fallback(
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_MESSAGE},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.3,
-                max_tokens=220,
-            )
+            # Qwen uses ChatML tags
+            payload = {
+                "inputs": f"<|im_start|>user\n{prompt_content}\n<|im_end|>\n<|im_start|>assistant\n",
+                "parameters": {"max_new_tokens": 200, "temperature": 0.3}
+            }
 
-            text = response.choices[0].message.content.strip()
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            response.raise_for_status()
+            res_json = response.json()
+
+            text = ""
+            if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
+                text = res_json[0]["generated_text"]
+                if "<|im_start|>assistant\n" in text:
+                    text = text.split("<|im_start|>assistant\n")[-1]
+            else:
+                text = str(res_json)
+
             decision, confidence, reasoning = self._parse_response(text)
+            
+            # Deterministic guards take precedence over LLM decisions
             decision, confidence, reasoning = self._apply_identity_guards(
                 decision=decision,
                 confidence=confidence,
@@ -154,7 +118,7 @@ class FraudAgent:
             )
 
         except Exception as exc:
-            print(f"[FraudAgent] LLM call failed, using fallback: {exc}")
+            print(f"[FraudAgent] HuggingFace API call failed, using fallback: {exc}")
             return self._fallback(
                 obs=obs,
                 sub_reports=sub_reports,

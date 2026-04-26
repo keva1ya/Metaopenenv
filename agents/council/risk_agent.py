@@ -1,18 +1,16 @@
 """
 Risk Agent — Head Agent (Level 2).
 
-Chief Risk Officer. Uses GPT-4o-mini.
+Chief Risk Officer. Uses HuggingFace Inference API with keva1ya/qwen-risk-merged.
 Consumes: CreditAnalyst + IncomeVerifier + DebtAnalyzer reports.
 Prompt receives: financial fields ONLY (no behavioral).
 
 On ANY exception: falls back to majority vote of sub-agents.
 """
 
-import os
 import re
+import requests
 from typing import List, Optional
-
-from openai import OpenAI
 
 from agents.sub_agents.risk.credit_analyst import SubAgentReport
 from env.action import LoanAction
@@ -44,45 +42,13 @@ class HeadAgentVote:
 class RiskAgent:
     """
     Chief Risk Officer head agent.
-    Synthesizes reports from 3 risk sub-agents using GPT-4o-mini.
+    Synthesizes reports from 3 risk sub-agents using keva1ya/qwen-risk-merged.
     Falls back to majority vote on any failure.
     """
 
-    SYSTEM_MESSAGE = (
-        "You are the Chief Risk Officer.\n"
-        "Evaluate ONLY financial risk.\n"
-        "Never consider behavioral signals.\n"
-        "Honest behavior does not guarantee financial safety."
-    )
-
-    def __init__(
-        self,
-        client: Optional[OpenAI] = None,
-        model_name: str = "openrouter/auto",
-    ):
-        self.client = client
-        self.model_name = model_name
-
-    def _complete_with_fallback(self, messages: list, temperature: float, max_tokens: int):
-        """Try primary model, then fallback model if configured."""
-        fallback_model = os.getenv("OPENROUTER_FALLBACK_MODEL", "openrouter/auto")
-        candidates = [self.model_name]
-        if fallback_model and fallback_model not in candidates:
-            candidates.append(fallback_model)
-
-        last_exc = None
-        for model in candidates:
-            try:
-                return self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-            except Exception as exc:
-                last_exc = exc
-                continue
-        raise last_exc if last_exc is not None else RuntimeError("No model candidates configured")
+    def __init__(self, client=None, model_name=None):
+        # We ignore client and model_name to use the direct HF Inference API
+        pass
 
     def evaluate(
         self,
@@ -91,14 +57,16 @@ class RiskAgent:
         dissent_context: str,
     ) -> HeadAgentVote:
         """
-        Synthesize sub-agent reports into a single risk vote.
-        Uses GPT-4o-mini with fallback to majority rule.
+        Synthesize sub-agent reports into a single risk vote using HuggingFace API.
+        Falls back to majority rule.
         """
         try:
-            if self.client is None:
-                raise ValueError("No OpenRouter client configured")
-
-            # Build user prompt with financial fields only
+            API_URL = "https://api-inference.huggingface.co/models/keva1ya/qwen-risk-merged"
+            headers = {
+                "Authorization": "Bearer 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"
+            }
+            
+            # Format sub-agent reports
             report_lines = []
             for r in sub_reports:
                 report_lines.append(
@@ -106,38 +74,35 @@ class RiskAgent:
                     f"conf={r.confidence:.2f} flags={r.key_flags}"
                 )
 
-            user_prompt = (
-                f"<sub_agent_reports>\n"
-                f"{'\n'.join(report_lines)}\n"
-                f"</sub_agent_reports>\n\n"
-                f"<applicant_data>\n"
-                f"  Income: {obs.income:.0f}\n"
-                f"  Credit Score: {obs.credit_score}\n"
-                f"  Employment: {obs.employment_years}yr\n"
-                f"  Loan Amount: {obs.loan_amount:.0f}\n"
-                f"  Existing Debt: {obs.existing_debt:.0f}\n"
-                f"  Mortgage Value: {obs.mortgage_value:.0f}\n"
-                f"  Loan Term: {obs.loan_term}yr\n"
-                f"</applicant_data>\n\n"
-                f"<dissent_history>\n"
-                f"{dissent_context}\n"
-                f"</dissent_history>\n\n"
-                f"Respond ONLY:\n"
-                f"DECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\n"
-                f"CONFIDENCE: <0.0-1.0>\n"
-                f"REASONING: <2 sentences>"
+            prompt_content = (
+                f"Assess credit risk strictly based on these sub-agent reports and financial data.\n\n"
+                f"Sub-Agent Reports:\n{chr(10).join(report_lines)}\n\n"
+                f"Financial Data: Income {obs.income:.0f}, Credit Score {obs.credit_score}, "
+                f"Employment {obs.employment_years}yr, Loan Amount {obs.loan_amount:.0f}, "
+                f"Existing Debt {obs.existing_debt:.0f}, Mortgage Value {obs.mortgage_value:.0f}, "
+                f"Loan Term {obs.loan_term}yr.\n\n"
+                f"Respond ONLY with:\nDECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\nCONFIDENCE: <0.0-1.0>\nREASONING: <2 sentences>"
             )
 
-            response = self._complete_with_fallback(
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_MESSAGE},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.3,
-                max_tokens=200,
-            )
+            payload = {
+                "inputs": f"<|im_start|>user\n{prompt_content}\n<|im_end|>\n<|im_start|>assistant\n",
+                "parameters": {"max_new_tokens": 200, "temperature": 0.3}
+            }
 
-            text = response.choices[0].message.content.strip()
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            response.raise_for_status()
+            res_json = response.json()
+
+            # Parse Hugging Face Inference API response
+            text = ""
+            if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
+                text = res_json[0]["generated_text"]
+                # The model often returns the full prompt too, so extract assistant's part
+                if "<|im_start|>assistant\n" in text:
+                    text = text.split("<|im_start|>assistant\n")[-1]
+            else:
+                text = str(res_json)
+
             decision, confidence, reasoning = self._parse_response(text)
 
             return HeadAgentVote(
@@ -149,8 +114,7 @@ class RiskAgent:
             )
 
         except Exception as exc:
-            print(f"[RiskAgent] LLM call failed, using fallback: {exc}")
-            # Fallback: majority vote of sub-agents
+            print(f"[RiskAgent] HuggingFace API call failed, using fallback: {exc}")
             return self._fallback(sub_reports)
 
     def _parse_response(self, text: str):
@@ -195,7 +159,6 @@ class RiskAgent:
                 vote_map[rec] += 1
             total_conf += r.confidence
 
-        # Find majority
         majority = max(vote_map, key=vote_map.get)
         avg_conf = total_conf / max(len(sub_reports), 1)
 

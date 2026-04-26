@@ -33,7 +33,6 @@ from agents.voting import VoteResult, VotingEngine
 from brain.state_builder import PortfolioState
 from brain.reward_shaper import calculate_shaped_reward
 from env.action import LoanAction
-from env.data_generator import SyntheticDataGenerator
 from env.grader import EasyGrader, HardGrader, MediumGrader
 from env.observation import LoanObservation
 
@@ -83,7 +82,7 @@ class LoanApprovalEnv:
         self.portfolio = PortfolioState()
         self.dissent_context = "No dissent history yet."
 
-        self.generator = SyntheticDataGenerator(seed=seed)
+
 
         # ── ENSEMBLE MODEL PIPELINE ──────────────────────────
         # Each council head agent is wired to a fine-tuned model:
@@ -213,11 +212,15 @@ class LoanApprovalEnv:
             self.grader = HardGrader()
 
     def reset(self) -> LoanObservation:
-        """Reset environment: generate new applicant, load dissent."""
+        """Reset environment: prepare for next episode. User must call set_observation."""
         self.episode += 1
-        self.current_obs = self.generator.generate()
+        self.current_obs = None
         self.dissent_context = self._load_dissent_context()
         return self.current_obs
+
+    def set_observation(self, obs: LoanObservation):
+        """Manually inject applicant data into the environment."""
+        self.current_obs = obs
 
     def get_council_recommendation(self) -> VoteResult:
         """

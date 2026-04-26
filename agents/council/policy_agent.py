@@ -1,7 +1,7 @@
 """
 Policy Agent - Head Agent (Level 2).
 
-Chief Policy Officer. Uses GPT-style synthesis through OpenRouter.
+Chief Policy Officer. Uses HuggingFace Inference API with Keva1ya/mistral-risk-model.
 Consumes: ComplianceOfficer + TermValidator + LTVChecker reports.
 Prompt receives broader application context.
 
@@ -10,11 +10,9 @@ gates. On any exception, it falls back to a soft synthesis
 of sub-agent signals instead of deterministic rejection rules.
 """
 
-import os
 import re
+import requests
 from typing import List, Optional
-
-from openai import OpenAI
 
 from agents.council.risk_agent import HeadAgentVote
 from agents.sub_agents.risk.credit_analyst import SubAgentReport
@@ -25,49 +23,12 @@ from env.observation import LoanObservation
 class PolicyAgent:
     """
     Chief Policy Officer head agent.
-    Synthesizes reports from 3 policy sub-agents using an LLM.
+    Synthesizes reports from 3 policy sub-agents using Keva1ya/mistral-risk-model.
     Falls back to a soft aggregation policy judgment on failure.
     """
 
-    SYSTEM_MESSAGE = (
-        "You are the Chief Policy Officer.\n"
-        "Evaluate policy suitability using holistic judgment.\n"
-        "Do not apply rigid hard-coded cutoffs as mandatory vetoes.\n"
-        "Weigh the policy sub-agent reports together with the full "
-        "application context, including affordability, collateral, "
-        "customer quality, term structure, debt burden, and edge cases.\n"
-        "Use REQUEST_MORE_INFO when the application looks policy-uncertain "
-        "rather than clearly acceptable or clearly unsuitable."
-    )
-
-    def __init__(
-        self,
-        client: Optional[OpenAI] = None,
-        model_name: str = "openrouter/auto",
-    ):
-        self.client = client
-        self.model_name = model_name
-
-    def _complete_with_fallback(self, messages: list, temperature: float, max_tokens: int):
-        """Try primary model, then fallback model if configured."""
-        fallback_model = os.getenv("OPENROUTER_FALLBACK_MODEL", "openrouter/auto")
-        candidates = [self.model_name]
-        if fallback_model and fallback_model not in candidates:
-            candidates.append(fallback_model)
-
-        last_exc = None
-        for model in candidates:
-            try:
-                return self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-            except Exception as exc:
-                last_exc = exc
-                continue
-        raise last_exc if last_exc is not None else RuntimeError("No model candidates configured")
+    def __init__(self, client=None, model_name=None):
+        pass
 
     def evaluate(
         self,
@@ -77,11 +38,13 @@ class PolicyAgent:
     ) -> HeadAgentVote:
         """
         Synthesize policy sub-agent reports into a single vote.
-        Uses the configured LLM with soft aggregation fallback.
+        Uses the configured HuggingFace model with soft aggregation fallback.
         """
         try:
-            if self.client is None:
-                raise ValueError("No OpenRouter client configured")
+            API_URL = "https://api-inference.huggingface.co/models/Keva1ya/mistral-risk-model"
+            headers = {
+                "Authorization": "Bearer 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"
+            }
 
             report_lines = []
             for report in sub_reports:
@@ -90,45 +53,39 @@ class PolicyAgent:
                     f"conf={report.confidence:.2f} flags={report.key_flags}"
                 )
 
-            user_prompt = (
-                f"<sub_agent_reports>\n"
-                f"{'\n'.join(report_lines)}\n"
-                f"</sub_agent_reports>\n\n"
-                f"<applicant_data>\n"
-                f"  Age: {obs.age}\n"
-                f"  Loan Term: {obs.loan_term}yr\n"
-                f"  Loan Amount: {obs.loan_amount:.0f}\n"
-                f"  Income: {obs.income:.0f}\n"
-                f"  Existing Debt: {obs.existing_debt:.0f}\n"
-                f"  Mortgage Value: {obs.mortgage_value:.0f}\n"
-                f"  Employment Years: {obs.employment_years}\n"
-                f"  Monthly Expenses: {obs.monthly_expenses:.0f}\n"
-                f"  Dependents: {obs.num_dependents}\n"
-                f"  Previous Defaults: {obs.previous_defaults}\n"
-                f"  GST Registered: {obs.gst_registered}\n"
-                f"  ITR Filed Years: {obs.itr_filed_years}\n"
-                f"  Customer Score: {obs.customer_score:.2f}\n"
-                f"  Loan Type: {obs.loan_type}\n"
-                f"</applicant_data>\n\n"
-                f"<dissent_history>\n"
-                f"{dissent_context}\n"
-                f"</dissent_history>\n\n"
-                f"Respond ONLY:\n"
-                f"DECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\n"
-                f"CONFIDENCE: <0.0-1.0>\n"
-                f"REASONING: <2 sentences>"
+            prompt_content = (
+                f"Evaluate policy suitability using holistic judgment.\n"
+                f"Weigh the policy sub-agent reports together with the full applicant context.\n\n"
+                f"Sub-Agent Reports:\n{chr(10).join(report_lines)}\n\n"
+                f"Applicant Data: Age {obs.age}, Loan Term {obs.loan_term}yr, "
+                f"Loan Amount {obs.loan_amount:.0f}, Income {obs.income:.0f}, "
+                f"Existing Debt {obs.existing_debt:.0f}, Mortgage Value {obs.mortgage_value:.0f}, "
+                f"Employment Years {obs.employment_years}, Monthly Expenses {obs.monthly_expenses:.0f}, "
+                f"Dependents {obs.num_dependents}, Previous Defaults {obs.previous_defaults}, "
+                f"GST Registered {obs.gst_registered}, ITR Filed Years {obs.itr_filed_years}, "
+                f"Customer Score {obs.customer_score:.2f}, Loan Type {obs.loan_type}\n\n"
+                f"Respond ONLY with:\nDECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\nCONFIDENCE: <0.0-1.0>\nREASONING: <2 sentences>"
             )
 
-            response = self._complete_with_fallback(
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_MESSAGE},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.3,
-                max_tokens=200,
-            )
+            # Mistral commonly uses a different chat template than Qwen, e.g. [INST] [/INST]
+            # Assuming standard Mistral instruct template here.
+            payload = {
+                "inputs": f"[INST] {prompt_content} [/INST]\n",
+                "parameters": {"max_new_tokens": 200, "temperature": 0.3}
+            }
 
-            text = response.choices[0].message.content.strip()
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+            response.raise_for_status()
+            res_json = response.json()
+
+            text = ""
+            if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
+                text = res_json[0]["generated_text"]
+                if "[/INST]\n" in text:
+                    text = text.split("[/INST]\n")[-1]
+            else:
+                text = str(res_json)
+
             decision, confidence, reasoning = self._parse_response(text)
 
             return HeadAgentVote(
@@ -140,7 +97,7 @@ class PolicyAgent:
             )
 
         except Exception as exc:
-            print(f"[PolicyAgent] LLM call failed, using fallback: {exc}")
+            print(f"[PolicyAgent] HuggingFace API call failed, using fallback: {exc}")
             return self._fallback(sub_reports)
 
     def _parse_response(self, text: str):
