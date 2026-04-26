@@ -16,7 +16,7 @@ sys.path.insert(0, '.')
 from env.observation import LoanObservation
 obs = LoanObservation(
     income=80000, credit_score=720, employment_years=10,
-    loan_amount=200000, mortgage_value=300000, loan_term=15,
+    loan_amount=200000, loan_type="Personal", mortgage_value=300000, loan_term=15,
     existing_debt=50000, age=35, monthly_expenses=25000,
     num_dependents=2, previous_defaults=0, gst_registered=True,
     itr_filed_years=8, customer_score=0.85,
@@ -25,11 +25,7 @@ obs = LoanObservation(
 )
 print('✅ Applicant Profile created: Credit', obs.credit_score)
 
-# Test data generator
-from env.data_generator import SyntheticDataGenerator
-gen = SyntheticDataGenerator(seed=42)
-test_obs = gen.generate()
-print(f'✅ Synthetic Data Generator OK: income={test_obs.income:.0f}, credit={test_obs.credit_score}')
+
 
 # Test all 9 sub-agents
 from agents.sub_agents.risk.credit_analyst import CreditAnalystAgent

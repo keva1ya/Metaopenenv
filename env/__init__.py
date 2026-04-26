@@ -9,14 +9,12 @@ at import time. Use direct module imports for heavy classes.
 
 from env.observation import LoanObservation
 from env.action import LoanAction
-from env.data_generator import SyntheticDataGenerator
 from env.reward import RewardOutput
 from env.grader import EasyGrader, MediumGrader, HardGrader
 
 __all__ = [
     "LoanObservation",
     "LoanAction",
-    "SyntheticDataGenerator",
     "RewardOutput",
     "EasyGrader",
     "MediumGrader",

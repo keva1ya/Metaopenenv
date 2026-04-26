@@ -33,7 +33,6 @@ from agents.voting import VoteResult, VotingEngine
 from brain.state_builder import PortfolioState
 from brain.reward_shaper import calculate_shaped_reward
 from env.action import LoanAction
-from env.data_generator import SyntheticDataGenerator
 from env.grader import EasyGrader, HardGrader, MediumGrader
 from env.observation import LoanObservation
 
@@ -82,8 +81,6 @@ class LoanApprovalEnv:
         self.current_obs: Optional[LoanObservation] = None
         self.portfolio = PortfolioState()
         self.dissent_context = "No dissent history yet."
-
-        self.generator = SyntheticDataGenerator(seed=seed)
 
         # ── ENSEMBLE MODEL PIPELINE ──────────────────────────
         # Each council head agent is wired to a fine-tuned model:
@@ -212,12 +209,16 @@ class LoanApprovalEnv:
         else:
             self.grader = HardGrader()
 
-    def reset(self) -> LoanObservation:
-        """Reset environment: generate new applicant, load dissent."""
+    def reset(self) -> Optional[LoanObservation]:
+        """Reset environment: prepare for new episode."""
         self.episode += 1
-        self.current_obs = self.generator.generate()
+        self.current_obs = None
         self.dissent_context = self._load_dissent_context()
         return self.current_obs
+
+    def set_observation(self, obs: LoanObservation) -> None:
+        """Manually inject user or dataset-provided observation."""
+        self.current_obs = obs
 
     def get_council_recommendation(self) -> VoteResult:
         """
@@ -282,9 +283,9 @@ class LoanApprovalEnv:
                 council_result=None,
             )
             self.portfolio.update(action.value, reward)
-            next_obs = self.reset()
+            
             return (
-                next_obs,
+                self.current_obs,
                 reward,
                 False,
                 {
@@ -304,9 +305,9 @@ class LoanApprovalEnv:
                 council_result=None,
             )
             self.portfolio.update(action.value, reward)
-            next_obs = self.reset()
+            
             return (
-                next_obs,
+                self.current_obs,
                 reward,
                 False,
                 {
@@ -338,10 +339,9 @@ class LoanApprovalEnv:
             council_result=None,
         )
         self.portfolio.update(action.value, reward)
-        next_obs = self.reset()
-
+        
         return (
-            next_obs,
+            self.current_obs,
             reward,
             False,
             {
