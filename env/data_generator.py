@@ -35,6 +35,8 @@ class SyntheticDataGenerator:
         credit_score = int(self.rng.integers(300, 851))
         employment_years = int(self.rng.integers(0, 41))
         loan_amount = float(self.rng.uniform(50000, 500000))
+        loan_types = ["Personal", "Business", "Mortgage", "Auto", "Student", "Home/Land"]
+        loan_type = str(self.rng.choice(loan_types))
         mortgage_value = float(self.rng.uniform(0, 700000))
         loan_term = int(self.rng.integers(5, 31))
         existing_debt = float(self.rng.uniform(0, 200000))
@@ -95,6 +97,7 @@ class SyntheticDataGenerator:
             credit_score=credit_score,
             employment_years=employment_years,
             loan_amount=loan_amount,
+            loan_type=loan_type,
             mortgage_value=mortgage_value,
             loan_term=loan_term,
             existing_debt=existing_debt,

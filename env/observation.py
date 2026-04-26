@@ -31,6 +31,9 @@ class LoanObservation(BaseModel):
     credit_score: int = Field(ge=300, le=850, description="Credit bureau score")
     employment_years: int = Field(ge=0, le=40, description="Years of continuous employment")
     loan_amount: float = Field(ge=50000, le=500000, description="Requested loan amount")
+    loan_type: Literal["Personal", "Business", "Mortgage", "Auto", "Student", "Home/Land"] = Field(
+        description="The category or purpose of the requested loan"
+    )
     mortgage_value: float = Field(ge=0, le=700000, description="Existing mortgage/collateral value")
     loan_term: int = Field(ge=5, le=30, description="Loan term in years")
     existing_debt: float = Field(ge=0, le=200000, description="Total existing debt obligations")

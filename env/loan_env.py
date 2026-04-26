@@ -120,9 +120,9 @@ class LoanApprovalEnv:
         self.pattern_checker = PatternCheckerAgent()
         self.consistency_checker = ConsistencyCheckerAgent()
         self.identity_verifier = IdentityVerifierAgent()
-        self.compliance_officer = ComplianceOfficerAgent()
-        self.term_validator = TermValidatorAgent()
-        self.ltv_checker = LTVCheckerAgent()
+        self.compliance_officer = ComplianceOfficerAgent(client=minimax_client)
+        self.term_validator = TermValidatorAgent(client=minimax_client)
+        self.ltv_checker = LTVCheckerAgent(client=minimax_client)
 
         # Level 2: Head agents (GPT-4o-mini with fallback)
         self.risk_agent = RiskAgent(nemotron_client)

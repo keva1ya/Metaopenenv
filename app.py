@@ -215,6 +215,7 @@ def format_financial_table(obs: LoanObservation) -> list:
         ["Income", f"₹{obs.income:,.0f}"],
         ["Credit Score", str(obs.credit_score)],
         ["Employment Years", str(obs.employment_years)],
+        ["Loan Type", obs.loan_type],
         ["Loan Amount", f"₹{obs.loan_amount:,.0f}"],
         ["Mortgage Value", f"₹{obs.mortgage_value:,.0f}"],
         ["Loan Term", f"{obs.loan_term} years"],
