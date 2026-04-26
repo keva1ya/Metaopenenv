@@ -295,7 +295,7 @@ def process_next_applicant(
     obs = env.reset()
 
     # Check mortgage mode
-    is_mortgage_mode = obs.mortgage_value >= 1.1 * obs.loan_amount
+    is_mortgage_mode = obs.mortgage_value >= 1.3 * obs.loan_amount
 
     if is_mortgage_mode:
         action = LoanAction.APPROVE
@@ -309,7 +309,7 @@ def process_next_applicant(
             behavioral_table,
             [], [], [],  # sub-agent tables
             "🏠 MORTGAGE_MODE", "🏠 MORTGAGE_MODE", "🏠 MORTGAGE_MODE",
-            f"🏠 MORTGAGE_MODE — AUTO-APPROVED\nCollateral ₹{obs.mortgage_value:,.0f} ≥ 1.1× Loan ₹{obs.loan_amount:,.0f}",
+            f"🏠 MORTGAGE_MODE — AUTO-APPROVED\nCollateral ₹{obs.mortgage_value:,.0f} ≥ 1.3× Loan ₹{obs.loan_amount:,.0f}",
             reward,
             "Mortgage mode: collateral sufficient, auto-approved.",
             get_dissent_log(),
