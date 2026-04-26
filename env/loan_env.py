@@ -202,7 +202,7 @@ class LoanApprovalEnv:
         obs = self.current_obs
 
         # ── MORTGAGE_MODE check (first, before anything) ──
-        if obs.mortgage_value >= 1.1 * obs.loan_amount:
+        if obs.mortgage_value >= 1.3 * obs.loan_amount:
             reward = 1.0 if action == LoanAction.APPROVE else 0.0
             self._print_log(
                 action, reward, obs,
@@ -359,7 +359,7 @@ class LoanApprovalEnv:
             print(f"[MORTGAGE_MODE] Auto-approved.")
             print(
                 f"mortgage={obs.mortgage_value:.0f} "
-                f">= 1.1*loan={1.1 * obs.loan_amount:.0f}"
+                f">= 1.3*loan={1.3 * obs.loan_amount:.0f}"
             )
 
         if council_result and council_result.dissent_log:

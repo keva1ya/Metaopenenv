@@ -76,7 +76,7 @@ def run_inference() -> None:
             else:
                 action = (
                     LoanAction.APPROVE
-                    if obs.mortgage_value >= 1.1 * obs.loan_amount
+                    if obs.mortgage_value >= 1.3 * obs.loan_amount
                     else LoanAction.REJECT
                 )
 

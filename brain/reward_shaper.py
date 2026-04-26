@@ -36,7 +36,7 @@ def calculate_shaped_reward(
         return 0.0
 
     # MORTGAGE_MODE shortcut
-    if obs.mortgage_value >= 1.1 * obs.loan_amount:
+    if obs.mortgage_value >= 1.3 * obs.loan_amount:
         return 1.0 if action == "APPROVE" else 0.0
 
     # THREE REWARD COMPONENTS
@@ -50,7 +50,7 @@ def calculate_shaped_reward(
 
 def _financial_reward(obs: LoanObservation, action: str) -> float:
     """Reward based on financial risk assessment."""
-    if obs.mortgage_value >= 1.1 * obs.loan_amount:
+    if obs.mortgage_value >= 1.3 * obs.loan_amount:
         return 1.0 if action == "APPROVE" else 0.0
 
     risk_score = (

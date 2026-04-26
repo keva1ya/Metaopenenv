@@ -29,23 +29,22 @@ def _get_fraud_score(obs: LoanObservation) -> int:
 
 class EasyGrader:
     """
-    Easy difficulty: pure collateral check.
-    APPROVE if mortgage >= 1.1 × loan_amount, else REJECT.
+    Easy difficulty:        Mortgage mode test: 
+    APPROVE if mortgage >= 1.3 × loan_amount, else REJECT.
     """
 
     def grade(self, obs: LoanObservation, action: LoanAction) -> RewardOutput:
         expected = (
             LoanAction.APPROVE
-            if obs.mortgage_value >= 1.1 * obs.loan_amount
+            if obs.mortgage_value >= 1.3 * obs.loan_amount
             else LoanAction.REJECT
         )
         score = 1.0 if action == expected else 0.0
         return RewardOutput(
             score=score,
             reason=(
-                f"Expected {expected.value}. "
-                f"mortgage={obs.mortgage_value:.0f} "
-                f"vs 1.1x loan={1.1 * obs.loan_amount:.0f}"
+                f"Easy check passed: collateral={obs.mortgage_value:.0f} "
+                f"vs 1.3x loan={1.3 * obs.loan_amount:.0f}"
             ),
             risk_breakdown={"rule": "collateral_check"},
         )
