@@ -85,31 +85,96 @@ class LoanApprovalEnv:
 
         self.generator = SyntheticDataGenerator(seed=seed)
 
-        # API clients — graceful degradation if no key
+        # ── ENSEMBLE MODEL PIPELINE ──────────────────────────
+        # Each council head agent is wired to a fine-tuned model:
+        #   RiskAgent   → Qwen 2.5 (fine-tuned on Google Colab)
+        #   PolicyAgent → Mistral 7B (fine-tuned locally)
+        #   FraudAgent  → Llama 3 (fine-tuned locally)
+        #
+        # All three are hosted on Hugging Face. Inference is done via
+        # any OpenAI-compatible endpoint (HF Inference Endpoints,
+        # HF Inference Providers router, or local vLLM/Ollama).
+        #
+        # Resolution order per agent:
+        #   1. Agent-specific vars: <AGENT>_API_BASE/_API_KEY/_MODEL
+        #   2. Shared HF token: HF_TOKEN with default HF router base URL
+        #   3. OpenRouter legacy fallback: NEMOTRON/GLM/MINIMAX keys
+        #   4. Demo mode (deterministic rule-based fallback)
+        # ──────────────────────────────────────────────────────
         shared_openrouter_key = _env_secret("OPENROUTER_API_KEY")
-        nemotron_key = _env_secret("NEMOTRON_API_KEY") or shared_openrouter_key
-        glm_key = _env_secret("GLM_API_KEY") or shared_openrouter_key
-        minimax_key = _env_secret("MINIMAX_API_KEY") or shared_openrouter_key
+        shared_hf_token = _env_secret("HF_TOKEN")
 
-        self.demo_mode = not (nemotron_key or glm_key or minimax_key)
+        DEFAULT_HF_BASE = "https://router.huggingface.co/v1"
+        OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
-        def _build_client(api_key: str):
-            if not api_key:
+        def _resolve_agent(prefix: str, legacy_key_var: str, openrouter_default_model: str):
+            """
+            Resolve (api_key, base_url, model_name) for a council agent.
+            Prefers HF config; falls back to OpenRouter; returns None key for demo mode.
+            """
+            agent_key = _env_secret(f"{prefix}_API_KEY")
+            agent_base = _env_secret(f"{prefix}_API_BASE")
+            agent_model = _env_secret(f"{prefix}_MODEL")
+
+            if agent_key and agent_model:
+                return (
+                    agent_key,
+                    agent_base or DEFAULT_HF_BASE,
+                    agent_model,
+                )
+
+            if shared_hf_token and agent_model:
+                return (
+                    shared_hf_token,
+                    agent_base or DEFAULT_HF_BASE,
+                    agent_model,
+                )
+
+            legacy_key = _env_secret(legacy_key_var) or shared_openrouter_key
+            if legacy_key:
+                return (
+                    legacy_key,
+                    OPENROUTER_BASE,
+                    openrouter_default_model,
+                )
+
+            return (None, None, openrouter_default_model)
+
+        risk_key, risk_base, risk_model = _resolve_agent(
+            prefix="RISK",
+            legacy_key_var="NEMOTRON_API_KEY",
+            openrouter_default_model="nvidia/nemotron-nano-9b-v2:free",
+        )
+        fraud_key, fraud_base, fraud_model = _resolve_agent(
+            prefix="FRAUD",
+            legacy_key_var="GLM_API_KEY",
+            openrouter_default_model="z-ai/glm-4.5-air:free",
+        )
+        policy_key, policy_base, policy_model = _resolve_agent(
+            prefix="POLICY",
+            legacy_key_var="MINIMAX_API_KEY",
+            openrouter_default_model="minimax/minimax-m2.5:free",
+        )
+
+        self.demo_mode = not (risk_key or fraud_key or policy_key)
+
+        def _build_client(api_key: Optional[str], base_url: Optional[str]):
+            if not api_key or not base_url:
                 return None
             return OpenAI(
                 api_key=api_key,
-                base_url="https://openrouter.ai/api/v1",
+                base_url=base_url,
                 timeout=15.0,
                 max_retries=1,
             )
 
-        nemotron_client = _build_client(nemotron_key)
-        glm_client = _build_client(glm_key)
-        minimax_client = _build_client(minimax_key)
+        risk_client = _build_client(risk_key, risk_base)
+        fraud_client = _build_client(fraud_key, fraud_base)
+        policy_client = _build_client(policy_key, policy_base)
 
         if self.demo_mode:
             print(
-                "DEMO MODE: No OpenRouter API keys found. "
+                "DEMO MODE: No HuggingFace or OpenRouter keys found. "
                 "Head agents using rule-based fallback."
             )
 
@@ -120,14 +185,21 @@ class LoanApprovalEnv:
         self.pattern_checker = PatternCheckerAgent()
         self.consistency_checker = ConsistencyCheckerAgent()
         self.identity_verifier = IdentityVerifierAgent()
-        self.compliance_officer = ComplianceOfficerAgent(client=minimax_client)
-        self.term_validator = TermValidatorAgent(client=minimax_client)
-        self.ltv_checker = LTVCheckerAgent(client=minimax_client)
+        # Policy sub-agents share the policy client (Mistral on HF)
+        self.compliance_officer = ComplianceOfficerAgent(
+            client=policy_client, model_name=policy_model
+        )
+        self.term_validator = TermValidatorAgent(
+            client=policy_client, model_name=policy_model
+        )
+        self.ltv_checker = LTVCheckerAgent(
+            client=policy_client, model_name=policy_model
+        )
 
-        # Level 2: Head agents (GPT-4o-mini with fallback)
-        self.risk_agent = RiskAgent(nemotron_client)
-        self.fraud_agent = FraudAgent(glm_client)
-        self.policy_agent = PolicyAgent(minimax_client)
+        # Level 2: Head agents (ensemble of fine-tuned HF models with fallback)
+        self.risk_agent = RiskAgent(risk_client, model_name=risk_model)
+        self.fraud_agent = FraudAgent(fraud_client, model_name=fraud_model)
+        self.policy_agent = PolicyAgent(policy_client, model_name=policy_model)
 
         # Voting engine
         self.voting_engine = VotingEngine()

@@ -29,8 +29,14 @@ os.environ.setdefault("GRADIO_SKIP_RUNTIME_PYI", "1")
 import gradio as gr
 import numpy as np
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, Security, Request
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -122,10 +128,20 @@ trace_history: List[TraceRecord] = []
 current_council: Optional[VoteResult] = None
 last_override_info: str = "No overrides yet"
 
+def _agent_configured(prefix: str, legacy_key_var: str) -> bool:
+    """A council agent is live if HF (per-agent or shared) or legacy OpenRouter is set."""
+    has_hf = bool(_env_secret(f"{prefix}_API_KEY") or _env_secret("HF_TOKEN"))
+    has_model = bool(_env_secret(f"{prefix}_MODEL"))
+    has_legacy = bool(
+        _env_secret(legacy_key_var) or _env_secret("OPENROUTER_API_KEY")
+    )
+    return (has_hf and has_model) or has_legacy
+
+
 DEMO_MODE = not (
-    bool(_env_secret("NEMOTRON_API_KEY") or _env_secret("OPENROUTER_API_KEY")) and
-    bool(_env_secret("GLM_API_KEY") or _env_secret("OPENROUTER_API_KEY")) and
-    bool(_env_secret("MINIMAX_API_KEY") or _env_secret("OPENROUTER_API_KEY"))
+    _agent_configured("RISK", "NEMOTRON_API_KEY")
+    and _agent_configured("FRAUD", "GLM_API_KEY")
+    and _agent_configured("POLICY", "MINIMAX_API_KEY")
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -133,36 +149,57 @@ DEMO_MODE = not (
 # ═══════════════════════════════════════════════════════════════
 
 api = FastAPI(title="Loan Approval OpenEnv API", version="1.0")
+
+# 1. CORS Middleware
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Restrict this in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 2. Rate Limiting
+limiter = Limiter(key_func=get_remote_address)
+api.state.limiter = limiter
+api.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# 3. API Key Authentication
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def get_api_key(api_key_header: str = Security(API_KEY_HEADER)):
+    expected_api_key = os.getenv("APP_API_KEY")
+    if not expected_api_key:
+        return None  # Auth disabled if no key is set in env
+    if api_key_header == expected_api_key:
+        return api_key_header
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing API Key",
+    )
+
 APP_HOST = "127.0.0.1"
 DEFAULT_API_PORT = int(os.getenv("APP_API_PORT", "8000"))
 DEFAULT_UI_PORT = int(os.getenv("APP_UI_PORT", "7860"))
 
+# 4. Input Validation Models
+class StepRequest(BaseModel):
+    action: LoanAction
+
 
 @api.post("/reset")
-def api_reset():
+@limiter.limit("10/minute")
+def api_reset(request: Request, api_key: str = Depends(get_api_key)):
     """Reset environment and return new observation."""
     obs = env.reset()
     return JSONResponse(content=obs.model_dump())
 
 
 @api.post("/step")
-def api_step(body: dict):
+@limiter.limit("30/minute")
+def api_step(body: StepRequest, request: Request, api_key: str = Depends(get_api_key)):
     """Execute one step with the given action."""
-    action_str = body.get("action", "REJECT")
-    
-    # Validate action input
-    try:
-        action = LoanAction(action_str)
-    except ValueError:
-        valid_actions = [a.value for a in LoanAction]
-        return JSONResponse(
-            status_code=400,
-            content={
-                "error": "Invalid action",
-                "message": f"Expected one of {valid_actions}, got '{action_str}'",
-                "valid_actions": valid_actions
-            }
-        )
+    action = body.action
     
     next_obs, reward, done, info = env.step(action)
     return JSONResponse(
@@ -180,7 +217,8 @@ def api_step(body: dict):
 
 
 @api.get("/state")
-def api_state():
+@limiter.limit("60/minute")
+def api_state(request: Request, api_key: str = Depends(get_api_key)):
     """Return current observation."""
     if env.current_obs is None:
         return JSONResponse(content={"error": "No observation. Call /reset first."})
@@ -188,8 +226,9 @@ def api_state():
 
 
 @api.get("/health")
-def api_health():
-    """Health check endpoint."""
+@limiter.limit("60/minute")
+def api_health(request: Request):
+    """Health check endpoint (no auth required)."""
     return JSONResponse(
         content={
             "status": "ok",
@@ -1065,10 +1104,15 @@ if __name__ == "__main__":
     print(f"Gradio UI starting on http://{APP_HOST}:{ui_port}")
 
     # Start Gradio
+    ui_username = os.getenv("APP_UI_USERNAME")
+    ui_password = os.getenv("APP_UI_PASSWORD")
+    auth_config = (ui_username, ui_password) if ui_username and ui_password else None
+
     demo.launch(
         server_name=APP_HOST,
         server_port=ui_port,
         share=False,
         theme=APP_THEME,
         css=APP_CSS,
+        auth=auth_config,
     )

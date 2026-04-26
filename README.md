@@ -53,8 +53,8 @@ Applicant Profile (18 fields)
              │ 9 reports (rec + confidence + flags)
              ▼
 ┌─────────────────────────────────┐
-│  LEVEL 2: COUNCIL HEAD AGENTS   │  ← 3 LLM-powered synthesizers
-│  (OpenRouter: 3 free models)    │  ← Hard rule fallback on failure
+│  LEVEL 2: COUNCIL HEAD AGENTS   │  ← 3 fine-tuned LLMs (HF ensemble)
+│  (Qwen + Mistral + Llama 3)     │  ← Hard rule fallback on failure
 └────────────┬────────────────────┘
              │ 3 votes + reasoning + confidence
              ▼
@@ -103,13 +103,15 @@ Each agent returns three things: a **recommendation**, a **confidence score**, a
 
 ## Level 2 — The Council
 
-Three head agents receive the sub-agent reports for their domain. Each is powered by a different free OpenRouter model — they literally think differently.
+Three head agents receive the sub-agent reports for their domain. Each is powered by its own **fine-tuned, domain-specialised LLM** hosted on Hugging Face — together they form an **ensemble pipeline** where each model is the expert for its slice of underwriting.
 
-| Head Agent | Model | Domain |
-|---|---|---|
-| `RiskAgent` | Nemotron (nvidia/nemotron-4-340b) | Financial capacity to repay |
-| `FraudAgent` | GLM (glm-z1-flash) | Behavioral integrity and fraud signals |
-| `PolicyAgent` | MiniMax (minimax-m2.5) | Bank policy hard-rule compliance |
+| Head Agent | Fine-Tuned Model | Trained On | Domain |
+|---|---|---|---|
+| `RiskAgent` | **Qwen 2.5** | Google Colab → Hugging Face | Financial capacity to repay |
+| `PolicyAgent` | **Mistral 7B** | Local → Hugging Face | Bank policy & SBA compliance |
+| `FraudAgent` | **Llama 3** | Local → Hugging Face | Behavioral integrity & fraud signals |
+
+If any model is unreachable, that head agent falls back to its deterministic logic — the system never blocks on a flaky endpoint. See [`docs/model_integration_guide.md`](docs/model_integration_guide.md) for the full wiring guide.
 
 Each head agent receives only the sub-reports relevant to its domain, synthesizes them, and produces a structured verdict:
 
@@ -245,9 +247,9 @@ Metaopenenv/
 ├── requirements.txt
 ├── agents/
 │   ├── council/
-│   │   ├── risk_agent.py           ← RiskAgent (Nemotron)
-│   │   ├── fraud_agent.py          ← FraudAgent (GLM)
-│   │   └── policy_agent.py         ← PolicyAgent (MiniMax)
+│   │   ├── risk_agent.py           ← RiskAgent (Qwen 2.5 on HF)
+│   │   ├── fraud_agent.py          ← FraudAgent (Llama 3 on HF)
+│   │   └── policy_agent.py         ← PolicyAgent (Mistral 7B on HF)
 │   ├── sub_agents/
 │   │   ├── risk/                   ← CreditAnalyst, IncomeVerifier, DebtAnalyzer
 │   │   ├── fraud/                  ← PatternChecker, ConsistencyChecker, IdentityVerifier
@@ -284,15 +286,36 @@ pip install -r requirements.txt
 
 ### 2. Configure API keys
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root. Each council agent is wired to its own fine-tuned model on Hugging Face:
 
 ```env
-NEMOTRON_API_KEY=sk-or-v1-...
-GLM_API_KEY=sk-or-v1-...
-MINIMAX_API_KEY=sk-or-v1-...
+# Shared HF token (used when a per-agent *_API_KEY is unset)
+HF_TOKEN=""
+
+# RiskAgent → Qwen 2.5 (consumer credit risk)
+RISK_MODEL=""        # e.g. "your-username/qwen-credit-risk"
+RISK_API_KEY=""
+RISK_API_BASE=""     # leave blank to use HF Inference Providers router
+
+# PolicyAgent → Mistral 7B (bank policy & SBA compliance)
+POLICY_MODEL=""      # e.g. "your-username/mistral-policy-officer"
+POLICY_API_KEY=""
+POLICY_API_BASE=""
+
+# FraudAgent → Llama 3 (behavioural fraud)
+FRAUD_MODEL=""       # e.g. "your-username/llama3-fraud-detector"
+FRAUD_API_KEY=""
+FRAUD_API_BASE=""
+
+# Optional legacy OpenRouter fallback (used only when HF is unconfigured)
+NEMOTRON_API_KEY=""
+GLM_API_KEY=""
+MINIMAX_API_KEY=""
 ```
 
-All three keys are **free OpenRouter models**. If any key is missing, all head agents run in deterministic fallback mode — the system never breaks.
+Resolution per agent: per-agent `*_API_KEY/_MODEL` → shared `HF_TOKEN` + `*_MODEL` → legacy OpenRouter key → demo mode (deterministic fallback). The system never breaks; missing config just degrades to safe rule-based decisions.
+
+Full setup recipes (HF Inference Endpoints, local vLLM, mixed) live in [`docs/model_integration_guide.md`](docs/model_integration_guide.md).
 
 **Optional runtime controls:**
 
@@ -349,7 +372,7 @@ Benchmarks all three task levels (5 episodes each). Prints per-episode reward an
 ## Design Decisions Worth Noting
 
 **Why three different LLMs?**
-Each head agent uses a different model. Risk uses Nemotron (strong at financial reasoning). Fraud uses GLM (strong at behavioral pattern recognition). Policy uses MiniMax (strong at structured rule application). Diversity in the council reduces systematic blind spots.
+Each head agent uses its own **fine-tuned** model trained on its domain. Risk uses Qwen 2.5 (strong tabular reasoning over consumer credit). Policy uses Mistral 7B (multi-rule compliance and SBA-style policy windows). Fraud uses Llama 3 (instruction-following over behavioural and KYC signals). Specialising each model on its slice removes systematic blind spots that a single general-purpose LLM would carry across all three domains.
 
 **Why deterministic sub-agents?**
 LLM calls are expensive and slow. The nine Level-1 specialists are pure Python — they run in milliseconds, have zero cost, and produce perfectly traceable outputs. The LLMs get a pre-digested signal packet, not raw numbers.
@@ -382,4 +405,4 @@ It is a structured multi-agent decision environment with:
 
 ## Acknowledgements
 
-Built on [OpenRouter](https://openrouter.ai) for free LLM access, [Gradio](https://gradio.app) for the UI, [FastAPI](https://fastapi.tiangolo.com) for the backend, [Pydantic](https://docs.pydantic.dev) for type-safe observations, and [PyTorch](https://pytorch.org) for the weight network.
+Built on [Hugging Face](https://huggingface.co) for hosting the fine-tuned ensemble (Qwen 2.5, Mistral 7B, Llama 3), [Gradio](https://gradio.app) for the UI, [FastAPI](https://fastapi.tiangolo.com) for the backend, [Pydantic](https://docs.pydantic.dev) for type-safe observations, and [PyTorch](https://pytorch.org) for the weight network. OpenRouter remains supported as a legacy fallback path.

@@ -9,6 +9,7 @@ weighted decision engine, not the final decision.
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -54,6 +55,35 @@ class VotingEngine:
     """
 
     DISSENT_LOG_PATH = "logs/dissent_log.json"
+
+    def _sanitize_reasoning(self, text: str, max_length: int = 250) -> str:
+        """
+        Sanitize LLM reasoning to prevent indirect prompt injection.
+        Caps length and strips out instruction-like keywords.
+        """
+        if not text:
+            return ""
+        
+        # 1. Cap length
+        sanitized = text[:max_length]
+        
+        # 2. Strip out common injection keywords (case-insensitive)
+        injection_patterns = [
+            r"ignore previous instructions",
+            r"system:",
+            r"user:",
+            r"assistant:",
+            r"respond only",
+            r"instruction:",
+            r"<\/?applicant_data>",
+            r"<\/?sub_agent_reports>",
+            r"<\/?dissent_history>",
+            r"<\/?identity_guidance>",
+        ]
+        for pattern in injection_patterns:
+            sanitized = re.sub(pattern, "[REDACTED]", sanitized, flags=re.IGNORECASE)
+            
+        return sanitized.strip()
 
     def run_vote(
         self,
@@ -117,7 +147,7 @@ class VotingEngine:
                             dissenting_agent=v.agent_name,
                             minority_decision=v.decision.value,
                             majority_decision=majority_action,
-                            dissent_reason=v.reasoning,
+                            dissent_reason=self._sanitize_reasoning(v.reasoning),
                             timestamp=datetime.now(timezone.utc).isoformat(),
                         )
                     )

@@ -91,9 +91,10 @@ class PolicyAgent:
                 )
 
             user_prompt = (
-                f"Sub-agent reports:\n"
-                f"{'\n'.join(report_lines)}\n\n"
-                f"Application context:\n"
+                f"<sub_agent_reports>\n"
+                f"{'\n'.join(report_lines)}\n"
+                f"</sub_agent_reports>\n\n"
+                f"<applicant_data>\n"
                 f"  Age: {obs.age}\n"
                 f"  Loan Term: {obs.loan_term}yr\n"
                 f"  Loan Amount: {obs.loan_amount:.0f}\n"
@@ -107,8 +108,11 @@ class PolicyAgent:
                 f"  GST Registered: {obs.gst_registered}\n"
                 f"  ITR Filed Years: {obs.itr_filed_years}\n"
                 f"  Customer Score: {obs.customer_score:.2f}\n"
-                f"  Loan Type: {obs.loan_type}\n\n"
-                f"DISSENT HISTORY: {dissent_context}\n\n"
+                f"  Loan Type: {obs.loan_type}\n"
+                f"</applicant_data>\n\n"
+                f"<dissent_history>\n"
+                f"{dissent_context}\n"
+                f"</dissent_history>\n\n"
                 f"Respond ONLY:\n"
                 f"DECISION: <APPROVE|REJECT|REQUEST_MORE_INFO>\n"
                 f"CONFIDENCE: <0.0-1.0>\n"
