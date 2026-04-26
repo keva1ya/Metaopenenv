@@ -12,6 +12,7 @@ Explicit safeguards:
 - Bank KYC pending alone => REQUEST_MORE_INFO / human verification
 """
 
+import os
 import re
 from typing import List, Optional
 
@@ -45,10 +46,31 @@ class FraudAgent:
     def __init__(
         self,
         client: Optional[OpenAI] = None,
-        model_name: str = "z-ai/glm-4.5-air:free",
+        model_name: str = "openrouter/auto",
     ):
         self.client = client
         self.model_name = model_name
+
+    def _complete_with_fallback(self, messages: list, temperature: float, max_tokens: int):
+        """Try primary model, then fallback model if configured."""
+        fallback_model = os.getenv("OPENROUTER_FALLBACK_MODEL", "openrouter/auto")
+        candidates = [self.model_name]
+        if fallback_model and fallback_model not in candidates:
+            candidates.append(fallback_model)
+
+        last_exc = None
+        for model in candidates:
+            try:
+                return self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except Exception as exc:
+                last_exc = exc
+                continue
+        raise last_exc if last_exc is not None else RuntimeError("No model candidates configured")
 
     def evaluate(
         self,
@@ -97,8 +119,7 @@ class FraudAgent:
                 f"REASONING: <2 sentences>"
             )
 
-            response = self.client.chat.completions.create(
-                model=self.model_name,
+            response = self._complete_with_fallback(
                 messages=[
                     {"role": "system", "content": self.SYSTEM_MESSAGE},
                     {"role": "user", "content": user_prompt},
@@ -127,7 +148,8 @@ class FraudAgent:
                 sub_agent_reports=sub_reports,
             )
 
-        except Exception:
+        except Exception as exc:
+            print(f"[FraudAgent] LLM call failed, using fallback: {exc}")
             return self._fallback(
                 obs=obs,
                 sub_reports=sub_reports,

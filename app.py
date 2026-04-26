@@ -18,9 +18,13 @@ Features:
 
 import json
 import os
+import socket
 import sys
 import threading
 from typing import List, Optional
+
+# Avoid runtime pyi generation in Gradio on startup (can stall on some environments).
+os.environ.setdefault("GRADIO_SKIP_RUNTIME_PYI", "1")
 
 import gradio as gr
 import numpy as np
@@ -48,6 +52,37 @@ from brain.reward_shaper import (
 from env.action import LoanAction
 from env.loan_env import LoanApprovalEnv
 from env.observation import LoanObservation
+
+
+def _env_secret(name: str) -> str:
+    """Load env var and normalize surrounding whitespace/quotes."""
+    raw = os.getenv(name, "")
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1].strip()
+    return value
+
+
+def _is_port_free(host: str, port: int) -> bool:
+    """Return True when the given host/port is available for binding."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def _pick_port(host: str, preferred_port: int, search_window: int = 50) -> int:
+    """Pick the preferred port when free, otherwise the next available port."""
+    for port in range(preferred_port, preferred_port + search_window):
+        if _is_port_free(host, port):
+            return port
+    raise RuntimeError(
+        f"No free port found for {host} in range "
+        f"{preferred_port}-{preferred_port + search_window - 1}."
+    )
 
 # ═══════════════════════════════════════════════════════════════
 # GLOBAL STATE
@@ -88,9 +123,9 @@ current_council: Optional[VoteResult] = None
 last_override_info: str = "No overrides yet"
 
 DEMO_MODE = not (
-    bool(os.getenv("NEMOTRON_API_KEY")) and 
-    bool(os.getenv("GLM_API_KEY")) and 
-    bool(os.getenv("MINIMAX_API_KEY"))
+    bool(_env_secret("NEMOTRON_API_KEY") or _env_secret("OPENROUTER_API_KEY")) and
+    bool(_env_secret("GLM_API_KEY") or _env_secret("OPENROUTER_API_KEY")) and
+    bool(_env_secret("MINIMAX_API_KEY") or _env_secret("OPENROUTER_API_KEY"))
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -98,6 +133,9 @@ DEMO_MODE = not (
 # ═══════════════════════════════════════════════════════════════
 
 api = FastAPI(title="Loan Approval OpenEnv API", version="1.0")
+APP_HOST = "127.0.0.1"
+DEFAULT_API_PORT = int(os.getenv("APP_API_PORT", "8000"))
+DEFAULT_UI_PORT = int(os.getenv("APP_UI_PORT", "7860"))
 
 
 @api.post("/reset")
@@ -161,9 +199,9 @@ def api_health():
     )
 
 
-def run_api():
+def run_api(port: int):
     """Run FastAPI server in a daemon thread."""
-    uvicorn.run(api, host="127.0.0.1", port=8000, log_level="warning")
+    uvicorn.run(api, host=APP_HOST, port=port, log_level="warning")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -244,9 +282,6 @@ def get_dissent_log() -> list:
 
 def process_next_applicant(
     selected_action: str, 
-    risk_model: str, 
-    fraud_model: str, 
-    policy_model: str,
     risk_weight: int,
     fraud_weight: int,
     policy_weight: int
@@ -254,10 +289,8 @@ def process_next_applicant(
     """Process one complete episode through the full pipeline."""
     global current_council, last_override_info
 
-    # Apply dynamic model configs
-    env.risk_agent.model_name = risk_model
-    env.fraud_agent.model_name = fraud_model
-    env.policy_agent.model_name = policy_model
+    if (risk_weight + fraud_weight + policy_weight) != 100:
+        raise gr.Error("The Agent Scoring Multipliers must sum exactly to 100.")
 
     obs = env.reset()
 
@@ -445,40 +478,276 @@ def export_dissent():
 # GRADIO UI
 # ═══════════════════════════════════════════════════════════════
 
+APP_THEME = gr.themes.Soft(
+    primary_hue=gr.themes.colors.red,
+    secondary_hue=gr.themes.colors.stone,
+    neutral_hue=gr.themes.colors.slate,
+)
+
+APP_CSS = """
+:root {
+  --brand-deep: #660000;
+  --brand-ink: #2a0000;
+  --brand-rose: #8f4d4d;
+  --paper: #0a0a0a;
+  --ink: #eaeaea;
+  --muted: #888888;
+  --line: rgba(102, 0, 0, 0.4);
+  --panel: rgba(18, 18, 18, 0.95);
+  --shadow: 0 14px 36px rgba(0, 0, 0, 0.9);
+}
+
+body {
+  background: #000000 !important;
+  color: var(--ink);
+}
+
+.gradio-container {
+  background: transparent !important;
+  max-width: 1400px !important;
+  padding: 28px 18px 56px !important;
+}
+
+.gradio-container .block,
+.gradio-container .gr-box,
+.gradio-container .gr-group,
+.gradio-container .gr-form,
+.gradio-container .gr-panel,
+.gradio-container .gr-accordion,
+.gradio-container .gradio-dataframe,
+.gradio-container .gradio-textbox,
+.gradio-container .gradio-number,
+.gradio-container .gradio-json {
+  border-radius: 0px !important;
+}
+
+.gradio-container .gr-box,
+.gradio-container .gr-group,
+.gradio-container .gr-form,
+.gradio-container .gr-panel,
+.gradio-container .gr-accordion,
+.gradio-container .gradio-dataframe,
+.gradio-container .gradio-textbox,
+.gradio-container .gradio-number,
+.gradio-container .gradio-json,
+.gradio-container .gradio-dropdown,
+.gradio-container .gradio-radio {
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: var(--shadow) !important;
+}
+
+.hero-shell {
+  margin-bottom: 18px;
+}
+
+.hero-card {
+  padding: 28px 30px;
+  border-radius: 0px;
+  background: linear-gradient(135deg, rgba(43, 31, 31, 0.96), rgba(76, 39, 40, 0.94) 62%, rgba(108, 28, 31, 0.9));
+  color: #fff7f2;
+  box-shadow: 0 20px 48px rgba(58, 17, 18, 0.14);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.hero-kicker {
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: #d8c1bc;
+  margin-bottom: 14px;
+}
+
+.hero-title {
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  line-height: 1.02;
+  font-weight: 650;
+  margin: 0 0 12px;
+  max-width: 720px;
+}
+
+.hero-copy {
+  max-width: 760px;
+  color: #eededa;
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.hero-pill {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 248, 243, 0.05);
+  border: 1px solid rgba(255, 235, 230, 0.1);
+}
+
+.hero-pill strong {
+  display: block;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #dec1bb;
+  margin-bottom: 4px;
+}
+
+.hero-pill span {
+  font-size: 1rem;
+  color: #fff7f2;
+}
+
+.demo-banner > div {
+  background: linear-gradient(90deg, rgba(102,0,0,0.16), rgba(102,0,0,0.05)) !important;
+  border: 1px solid rgba(102,0,0,0.18) !important;
+  border-radius: 20px !important;
+  color: var(--brand-ink) !important;
+}
+
+.gradio-container h3 {
+  color: var(--brand-ink) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em;
+}
+
+.gradio-container .gr-dataframe,
+.gradio-container .gradio-dataframe {
+  border-radius: 0px !important;
+}
+
+.financial-profile-panel,
+.behavioral-profile-panel,
+.financial-profile-column,
+.behavioral-profile-column,
+.financial-profile-panel > div,
+.behavioral-profile-panel > div,
+.financial-profile-column > div,
+.behavioral-profile-column > div,
+.financial-profile-panel .gradio-dataframe,
+.behavioral-profile-panel .gradio-dataframe,
+.financial-profile-panel .gr-dataframe,
+.behavioral-profile-panel .gr-dataframe,
+.financial-profile-column .gr-box,
+.behavioral-profile-column .gr-box,
+.financial-profile-column .gr-panel,
+.behavioral-profile-column .gr-panel {
+    border-radius: 0px !important;
+}
+
+.financial-profile-column *,
+.behavioral-profile-column * {
+    border-radius: 0px !important;
+}
+
+
+
+
+
+.gradio-container hr {
+  border: 0 !important;
+  height: 1px !important;
+  background: linear-gradient(90deg, transparent, rgba(102, 0, 0, 0.22), transparent) !important;
+  margin: 22px 0 16px !important;
+}
+
+.gradio-container .gr-button-primary,
+.gradio-container button.primary {
+  background: linear-gradient(135deg, #660000, #8a1c1c) !important;
+  border: none !important;
+  color: #fff8f3 !important;
+  border-radius: 999px !important;
+  box-shadow: 0 16px 34px rgba(102, 0, 0, 0.28) !important;
+}
+
+.gradio-container button:not(.primary) {
+  border-radius: 999px !important;
+}
+
+.gradio-container .gr-accordion summary {
+  background: rgba(102, 0, 0, 0.04) !important;
+  color: var(--brand-ink) !important;
+}
+
+.gradio-container .gr-dataframe table thead tr {
+  background: rgba(102, 0, 0, 0.07) !important;
+}
+
+.gradio-container .gr-dataframe table th {
+  color: var(--brand-ink) !important;
+}
+
+@media (max-width: 900px) {
+  .hero-card {
+    padding: 26px 22px;
+  }
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+"""
+
+
 def create_gradio_app() -> gr.Blocks:
     """Build the Gradio interface."""
     with gr.Blocks(
         title="🏦 AI Loan Approval System — Dynamic Weights v1",
-        theme=gr.themes.Glass(),
     ) as demo:
         # ── HEADER ──────────────────────────────────────────
         if DEMO_MODE:
             gr.Markdown(
                 "## ⚠️ DEMO MODE — No OpenRouter API keys detected. "
-                "Head agents using rule-based fallback."
+                "Head agents using rule-based fallback.",
+                elem_classes=["demo-banner"],
             )
 
-        gr.Markdown(
-            "# 🏦 AI Loan Approval System — Dynamic Weights v1\n"
-            "**Three-level agent hierarchy: "
-            "Sub-Agents → Head Council → Weighted Decision Engine**"
+        gr.HTML(
+            """
+            <section class="hero-shell">
+              <div class="hero-card">
+                <div class="hero-kicker">AI-Based Loan Analysis System</div>
+                <h1 class="hero-title">Underwriting with signal, dissent, and weighted judgment.</h1>
+                <div class="hero-copy">
+                  A decision cockpit for applicant review, fraud vigilance, policy synthesis,
+                  and portfolio-aware recommendations. Built to feel less like a generic dashboard
+                  and more like a private banking risk desk.
+                </div>
+                <div class="hero-grid">
+                  <div class="hero-pill"><strong>Architecture</strong><span>Sub-agents -> Council -> Weighted Engine</span></div>
+                  <div class="hero-pill"><strong>Palette</strong><span>Premium scheme built around #660000</span></div>
+                  <div class="hero-pill"><strong>Context</strong><span>AI-based loan analysis, fraud screening, policy review</span></div>
+                </div>
+              </div>
+            </section>
+            """
         )
 
         # ── PANEL 1: Applicant Profile ──────────────────────
         with gr.Row():
-            with gr.Column(scale=1):
+            with gr.Column(scale=1, elem_classes=["financial-profile-column"]):
                 gr.Markdown("### 📋 Financial Data")
                 financial_df = gr.Dataframe(
                     headers=["Field", "Value"],
                     label="Financial Profile",
                     interactive=False,
+                    column_widths=["55%", "45%"],
+                    wrap=True,
+                    max_height=900,
+                    elem_classes=["financial-profile-panel"],
                 )
-            with gr.Column(scale=1):
+            with gr.Column(scale=1, elem_classes=["behavioral-profile-column"]):
                 gr.Markdown("### 🧠 Behavioral Signals")
                 behavioral_df = gr.Dataframe(
                     headers=["Field", "Value"],
                     label="Behavioral Profile",
                     interactive=False,
+                    column_widths=["55%", "45%"],
+                    wrap=True,
+                    max_height=900,
+                    elem_classes=["behavioral-profile-panel"],
                 )
 
         # ── PANEL 2: Sub-Agent Reports ──────────────────────
@@ -490,18 +759,24 @@ def create_gradio_app() -> gr.Blocks:
                     headers=["Agent", "Rec", "Conf", "Flags"],
                     label="Risk",
                     interactive=False,
+                    wrap=True,
+                    max_height=600,
                 )
             with gr.Accordion("🕵️ Fraud Sub-Agents", open=False):
                 fraud_sub_df = gr.Dataframe(
                     headers=["Agent", "Rec", "Conf", "Flags"],
                     label="Fraud",
                     interactive=False,
+                    wrap=True,
+                    max_height=600,
                 )
             with gr.Accordion("📜 Policy Sub-Agents", open=False):
                 policy_sub_df = gr.Dataframe(
                     headers=["Agent", "Rec", "Conf", "Flags"],
                     label="Policy",
                     interactive=False,
+                    wrap=True,
+                    max_height=600,
                 )
 
         # ── PANEL 3: Council Vote ───────────────────────────
@@ -509,13 +784,13 @@ def create_gradio_app() -> gr.Blocks:
         gr.Markdown("### 🗳️ Council Vote")
         with gr.Row():
             risk_vote_box = gr.Textbox(
-                label="🔴 Risk Agent", interactive=False, lines=4
+                label="🔴 Risk Agent", interactive=False, lines=6, max_lines=12
             )
             fraud_vote_box = gr.Textbox(
-                label="🟡 Fraud Agent", interactive=False, lines=4
+                label="🟡 Fraud Agent", interactive=False, lines=6, max_lines=12
             )
             policy_vote_box = gr.Textbox(
-                label="🔵 Policy Agent", interactive=False, lines=4
+                label="🔵 Policy Agent", interactive=False, lines=6, max_lines=12
             )
 
         # ── PANEL 4: Weighted Engine Decision ───────────────
@@ -579,39 +854,16 @@ def create_gradio_app() -> gr.Blocks:
         with gr.Accordion("⚖️ Agent Scoring Multipliers (Must sum to 100)", open=True):
             gr.Markdown("Adjust the scoring weights for each head agent. These multipliers will scale the individual LLM confidence outputs.")
             with gr.Row():
-                risk_weight_slider = gr.Slider(
-                    minimum=0, maximum=100, step=1, value=33, label="Risk Multiplier"
+                risk_weight_slider = gr.Number(
+                    minimum=0, maximum=100, value=33, label="Risk Multiplier"
                 )
-                fraud_weight_slider = gr.Slider(
-                    minimum=0, maximum=100, step=1, value=33, label="Fraud Multiplier"
+                fraud_weight_slider = gr.Number(
+                    minimum=0, maximum=100, value=33, label="Fraud Multiplier"
                 )
-                policy_weight_slider = gr.Slider(
-                    minimum=0, maximum=100, step=1, value=34, label="Policy Multiplier"
+                policy_weight_slider = gr.Number(
+                    minimum=0, maximum=100, value=34, label="Policy Multiplier"
                 )
 
-        # ── PANEL 9: Advanced Model Configuration ───────────
-        gr.Markdown("---")
-        with gr.Accordion("⚙️ Advanced Model Configuration", open=False):
-            gr.Markdown("Configure the OpenRouter model acting as each specific Loan Agent.")
-            with gr.Row():
-                risk_model_dropdown = gr.Dropdown(
-                    choices=["nvidia/nemotron-4-340b-instruct:free", "z-ai/glm-4.5-air:free", "minimax/minimax-m2.5:free", "google/gemini-2.5-flash:free", "meta-llama/llama-3.3-70b-instruct:free"],
-                    value="nvidia/nemotron-4-340b-instruct:free",
-                    label="Risk Agent Model",
-                    allow_custom_value=True
-                )
-                fraud_model_dropdown = gr.Dropdown(
-                    choices=["nvidia/nemotron-4-340b-instruct:free", "z-ai/glm-4.5-air:free", "minimax/minimax-m2.5:free", "google/gemini-2.5-flash:free", "meta-llama/llama-3.3-70b-instruct:free"],
-                    value="z-ai/glm-4.5-air:free",
-                    label="Fraud Agent Model",
-                    allow_custom_value=True
-                )
-                policy_model_dropdown = gr.Dropdown(
-                    choices=["nvidia/nemotron-4-340b-instruct:free", "z-ai/glm-4.5-air:free", "minimax/minimax-m2.5:free", "google/gemini-2.5-flash:free", "meta-llama/llama-3.3-70b-instruct:free"],
-                    value="minimax/minimax-m2.5:free",
-                    label="Policy Agent Model",
-                    allow_custom_value=True
-                )
 
         # ── CONTROLS ────────────────────────────────────────
         gr.Markdown("---")
@@ -639,13 +891,11 @@ def create_gradio_app() -> gr.Blocks:
         )
 
         # ── WIRING ──────────────────────────────────────────
+
         next_btn.click(
             fn=process_next_applicant,
             inputs=[
                 action_radio, 
-                risk_model_dropdown, 
-                fraud_model_dropdown, 
-                policy_model_dropdown,
                 risk_weight_slider,
                 fraud_weight_slider,
                 policy_weight_slider
@@ -703,14 +953,20 @@ if __name__ == "__main__":
     # Initialize first observation
     env.reset()
 
+    api_port = _pick_port(APP_HOST, DEFAULT_API_PORT)
+    ui_port = _pick_port(APP_HOST, DEFAULT_UI_PORT)
+
     # Start FastAPI in daemon thread
-    api_thread = threading.Thread(target=run_api, daemon=True)
+    api_thread = threading.Thread(target=run_api, args=(api_port,), daemon=True)
     api_thread.start()
-    print("FastAPI running on http://127.0.0.1:8000")
+    print(f"FastAPI running on http://{APP_HOST}:{api_port}")
+    print(f"Gradio UI starting on http://{APP_HOST}:{ui_port}")
 
     # Start Gradio
     demo.launch(
-        server_name="127.0.0.1",
-        server_port=7860,
+        server_name=APP_HOST,
+        server_port=ui_port,
         share=False,
+        theme=APP_THEME,
+        css=APP_CSS,
     )

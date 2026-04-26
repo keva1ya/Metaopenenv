@@ -18,3 +18,9 @@ brain/*.pt
 .idea/
 .DS_Store
 Thumbs.db
+
+# Model Training Artifacts
+qwen_model/
+mistral-risk-lora-checkpoints/
+mistral-risk-lora/
+mistral-risk-merged/

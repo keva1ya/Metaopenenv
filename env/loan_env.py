@@ -15,6 +15,7 @@ import os
 from typing import Optional, Tuple
 
 from openai import OpenAI
+from dotenv import load_dotenv
 
 from agents.council.fraud_agent import FraudAgent
 from agents.council.policy_agent import PolicyAgent
@@ -35,6 +36,17 @@ from env.action import LoanAction
 from env.data_generator import SyntheticDataGenerator
 from env.grader import EasyGrader, HardGrader, MediumGrader
 from env.observation import LoanObservation
+
+load_dotenv()
+
+
+def _env_secret(name: str) -> str:
+    """Load env var and normalize surrounding whitespace/quotes."""
+    raw = os.getenv(name, "")
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1].strip()
+    return value
 
 
 def _get_fraud_score(obs: LoanObservation) -> int:
@@ -74,33 +86,31 @@ class LoanApprovalEnv:
         self.generator = SyntheticDataGenerator(seed=seed)
 
         # API clients — graceful degradation if no key
-        nemotron_key = os.getenv("NEMOTRON_API_KEY", "")
-        glm_key = os.getenv("GLM_API_KEY", "")
-        minimax_key = os.getenv("MINIMAX_API_KEY", "")
-        
-        # If any are missing, run in DEMO mode for safety, or we could require all 3.
-        self.demo_mode = not (nemotron_key and glm_key and minimax_key)
+        shared_openrouter_key = _env_secret("OPENROUTER_API_KEY")
+        nemotron_key = _env_secret("NEMOTRON_API_KEY") or shared_openrouter_key
+        glm_key = _env_secret("GLM_API_KEY") or shared_openrouter_key
+        minimax_key = _env_secret("MINIMAX_API_KEY") or shared_openrouter_key
+
+        self.demo_mode = not (nemotron_key or glm_key or minimax_key)
+
+        def _build_client(api_key: str):
+            if not api_key:
+                return None
+            return OpenAI(
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
+                timeout=15.0,
+                max_retries=1,
+            )
+
+        nemotron_client = _build_client(nemotron_key)
+        glm_client = _build_client(glm_key)
+        minimax_client = _build_client(minimax_key)
 
         if self.demo_mode:
-            nemotron_client = None
-            glm_client = None
-            minimax_client = None
             print(
-                "DEMO MODE: API keys not found. "
+                "DEMO MODE: No OpenRouter API keys found. "
                 "Head agents using rule-based fallback."
-            )
-        else:
-            nemotron_client = OpenAI(
-                api_key=nemotron_key,
-                base_url="https://openrouter.ai/api/v1"
-            )
-            glm_client = OpenAI(
-                api_key=glm_key,
-                base_url="https://openrouter.ai/api/v1"
-            )
-            minimax_client = OpenAI(
-                api_key=minimax_key,
-                base_url="https://openrouter.ai/api/v1"
             )
 
         # Level 1: Sub-agents (all rule-based, no LLM)
