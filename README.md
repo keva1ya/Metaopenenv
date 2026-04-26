@@ -358,6 +358,22 @@ Benchmarks all three task levels (5 episodes each). Prints per-episode reward an
 
 ---
 
+## Deploy to Hugging Face
+
+This repository ships with a complete **aggregator-only** deployment runbook
+for Hugging Face Spaces. The Space hosts only the orchestration layer; the
+three head LLMs run as separate Hugging Face Inference Endpoints and the
+combiner does no online learning in production.
+
+- **Runbook:** [`docs/HUGGINGFACE_DEPLOYMENT.md`](docs/HUGGINGFACE_DEPLOYMENT.md)
+- **Env template:** [`.env.example`](.env.example)
+- **Log persistence:** `scripts/sync_logs_to_hf_dataset.py`
+- **Offline RL pipeline:** `scripts/prepare_grpo_dataset.py` → `scripts/train_grpo_offline.py`
+- **Pre-launch validation:** `scripts/smoke_test_deployment.py`
+- **Training-only deps:** `requirements-train.txt` (do **not** install on the Space)
+
+---
+
 ## API Reference
 
 | Endpoint | Method | Description |
