@@ -28,8 +28,6 @@ os.environ.setdefault("GRADIO_SKIP_RUNTIME_PYI", "1")
 
 import gradio as gr
 import numpy as np
-import pandas as pd
-import io
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException, Security, Request
 from fastapi.responses import JSONResponse
@@ -130,9 +128,6 @@ trace_history: List[TraceRecord] = []
 current_council: Optional[VoteResult] = None
 last_override_info: str = "No overrides yet"
 
-dataset_df: Optional[pd.DataFrame] = None
-dataset_index: int = 0
-
 def _agent_configured(prefix: str, legacy_key_var: str) -> bool:
     """A council agent is live if HF (per-agent or shared) or legacy OpenRouter is set."""
     has_hf = bool(_env_secret(f"{prefix}_API_KEY") or _env_secret("HF_TOKEN"))
@@ -184,8 +179,8 @@ def get_api_key(api_key_header: str = Security(API_KEY_HEADER)):
     )
 
 APP_HOST = "127.0.0.1"
-DEFAULT_API_PORT = int(os.getenv("APP_API_PORT", "8101"))
-DEFAULT_UI_PORT = int(os.getenv("APP_UI_PORT", "7865"))
+DEFAULT_API_PORT = int(os.getenv("APP_API_PORT", "8000"))
+DEFAULT_UI_PORT = int(os.getenv("APP_UI_PORT", "7860"))
 
 # 4. Input Validation Models
 class StepRequest(BaseModel):
@@ -195,8 +190,10 @@ class StepRequest(BaseModel):
 @api.post("/reset")
 @limiter.limit("10/minute")
 def api_reset(request: Request, api_key: str = Depends(get_api_key)):
-    env.reset()
-    return JSONResponse(content={"status": "Environment reset. Waiting for dataset observation."})
+    """Reset environment and return new observation."""
+    obs = env.reset()
+    return JSONResponse(content=obs.model_dump())
+
 
 @api.post("/step")
 @limiter.limit("30/minute")
@@ -324,50 +321,18 @@ def get_dissent_log() -> list:
 
 
 def process_next_applicant(
-    # 18 fields
-    income, credit_score, employment_years, loan_amount, loan_type, mortgage_value,
-    loan_term, existing_debt, age, monthly_expenses, num_dependents, previous_defaults,
-    gst_registered, itr_filed_years, customer_score, spending_volatility,
-    loan_purpose_clarity, application_consistency, bank_kyc_status,
-    # action & weights
     selected_action: str, 
     risk_weight: int,
     fraud_weight: int,
     policy_weight: int
 ):
+    """Process one complete episode through the full pipeline."""
     global current_council, last_override_info
 
     if (risk_weight + fraud_weight + policy_weight) != 100:
         raise gr.Error("The Agent Scoring Multipliers must sum exactly to 100.")
 
-    # Create Observation from inputs
-    try:
-        obs = LoanObservation(
-            income=float(income),
-            credit_score=int(credit_score),
-            employment_years=int(employment_years),
-            loan_amount=float(loan_amount),
-            loan_type=str(loan_type),
-            mortgage_value=float(mortgage_value),
-            loan_term=int(loan_term),
-            existing_debt=float(existing_debt),
-            age=int(age),
-            monthly_expenses=float(monthly_expenses),
-            num_dependents=int(num_dependents),
-            previous_defaults=int(previous_defaults),
-            gst_registered=bool(gst_registered),
-            itr_filed_years=int(itr_filed_years),
-            customer_score=float(customer_score),
-            spending_volatility=float(spending_volatility),
-            loan_purpose_clarity=float(loan_purpose_clarity),
-            application_consistency=float(application_consistency),
-            bank_kyc_status=str(bank_kyc_status)
-        )
-    except Exception as e:
-        raise gr.Error(f"Invalid input data: {e}")
-
-    env.set_observation(obs)
-    env.episode += 1
+    obs = env.reset()
 
     # Check mortgage mode
     is_mortgage_mode = obs.mortgage_value >= 1.3 * obs.loan_amount
@@ -506,7 +471,9 @@ def process_next_applicant(
         dissent_badge = ""
 
     brain_text = (
-        f"⚖️ WEIGHTED FINAL DECISION: {action.value}\n{override_text}\nCouncil: {council_rec} | Engine: {action.value}{dissent_badge}"
+        f"⚖️ WEIGHTED FINAL DECISION: {action.value}\n"
+        f"{override_text}\n"
+        f"Council: {council_rec} | Engine: {action.value}{dissent_badge}"
     )
 
     reason_text = info.get("reward_output", None)
@@ -837,64 +804,7 @@ body {
 """
 
 
-
-def handle_dataset_upload(file):
-    global dataset_df, dataset_index
-    if file is None:
-        return "No file uploaded.", *[gr.update() for _ in range(18)]
-    
-    try:
-        # Check if CSV or JSON
-        if file.name.endswith('.csv'):
-            df = pd.read_csv(file.name)
-        elif file.name.endswith('.json'):
-            df = pd.read_json(file.name)
-        else:
-            return "Unsupported file format. Please upload CSV or JSON.", *[gr.update() for _ in range(18)]
-        
-        dataset_df = df
-        dataset_index = 0
-        return f"Successfully loaded dataset with {len(df)} rows. Click 'Load Next from Dataset'.", *[gr.update() for _ in range(18)]
-    except Exception as e:
-        return f"Error loading dataset: {e}", *[gr.update() for _ in range(18)]
-
-def load_next_from_dataset():
-    global dataset_df, dataset_index
-    if dataset_df is None or len(dataset_df) == 0:
-        return "No dataset loaded.", *[gr.update() for _ in range(18)]
-    
-    if dataset_index >= len(dataset_df):
-        dataset_index = 0  # loop back
-        
-    row = dataset_df.iloc[dataset_index]
-    dataset_index += 1
-    
-    # Extract fields with fallback defaults
-    return (
-        f"Loaded row {dataset_index}/{len(dataset_df)}",
-        float(row.get('income', 50000)),
-        int(row.get('credit_score', 700)),
-        int(row.get('employment_years', 5)),
-        float(row.get('loan_amount', 100000)),
-        str(row.get('loan_type', 'Personal')),
-        float(row.get('mortgage_value', 0)),
-        int(row.get('loan_term', 10)),
-        float(row.get('existing_debt', 5000)),
-        int(row.get('age', 35)),
-        float(row.get('monthly_expenses', 2000)),
-        int(row.get('num_dependents', 0)),
-        int(row.get('previous_defaults', 0)),
-        bool(row.get('gst_registered', False)),
-        int(row.get('itr_filed_years', 3)),
-        float(row.get('customer_score', 0.8)),
-        float(row.get('spending_volatility', 0.5)),
-        float(row.get('loan_purpose_clarity', 0.8)),
-        float(row.get('application_consistency', 0.9)),
-        str(row.get('bank_kyc_status', 'VERIFIED'))
-    )
-
 def create_gradio_app() -> gr.Blocks:
-
     """Build the Gradio interface."""
     with gr.Blocks(
         title="🏦 AI Loan Approval System — Dynamic Weights v1",
@@ -928,46 +838,7 @@ def create_gradio_app() -> gr.Blocks:
             """
         )
 
-        
-        # ── MANUAL ENTRY / DATASET INPUT ────────────────────
-        gr.Markdown("---")
-        gr.Markdown("### 📝 Applicant Data Entry / Dataset Upload")
-        with gr.Accordion("Upload Dataset (CSV/JSON)", open=False):
-            with gr.Row():
-                dataset_file = gr.File(label="Upload Dataset File", file_types=[".csv", ".json"])
-            with gr.Row():
-                upload_status = gr.Textbox(label="Dataset Status", interactive=False)
-            with gr.Row():
-                load_next_btn = gr.Button("⬇️ Load Next Row from Dataset")
-
-        with gr.Accordion("Manual Data Entry", open=True):
-            with gr.Row():
-                with gr.Column():
-                    gr.Markdown("#### Financial Data")
-                    inp_income = gr.Number(label="Income", value=80000)
-                    inp_credit_score = gr.Number(label="Credit Score", value=750)
-                    inp_employment_years = gr.Number(label="Employment Years", value=5)
-                    inp_loan_amount = gr.Number(label="Loan Amount", value=200000)
-                    inp_loan_type = gr.Dropdown(choices=["Personal", "Business", "Mortgage", "Auto", "Student", "Home/Land"], value="Personal", label="Loan Type")
-                    inp_mortgage_value = gr.Number(label="Mortgage Value", value=0)
-                    inp_loan_term = gr.Number(label="Loan Term", value=15)
-                    inp_existing_debt = gr.Number(label="Existing Debt", value=10000)
-                    inp_age = gr.Number(label="Age", value=35)
-                    inp_monthly_expenses = gr.Number(label="Monthly Expenses", value=3000)
-                with gr.Column():
-                    gr.Markdown("#### Additional Info & Behavioral Data")
-                    inp_num_dependents = gr.Number(label="Dependents", value=2)
-                    inp_previous_defaults = gr.Number(label="Previous Defaults", value=0)
-                    inp_gst_registered = gr.Checkbox(label="GST Registered", value=False)
-                    inp_itr_filed_years = gr.Number(label="ITR Filed Years", value=4)
-                    inp_customer_score = gr.Slider(minimum=0, maximum=1, value=0.85, label="Customer Score")
-                    inp_spending_volatility = gr.Slider(minimum=0, maximum=1, value=0.4, label="Spending Volatility")
-                    inp_loan_purpose_clarity = gr.Slider(minimum=0, maximum=1, value=0.9, label="Loan Purpose Clarity")
-                    inp_application_consistency = gr.Slider(minimum=0, maximum=1, value=0.95, label="Application Consistency")
-                    inp_bank_kyc_status = gr.Dropdown(choices=["VERIFIED", "PENDING", "FAILED"], value="VERIFIED", label="Bank KYC Status")
-
-
-# ── PANEL 1: Applicant Profile ──────────────────────
+        # ── PANEL 1: Applicant Profile ──────────────────────
         with gr.Row():
             with gr.Column(scale=1, elem_classes=["financial-profile-column"]):
                 gr.Markdown("### 📋 Financial Data")
@@ -1122,7 +993,7 @@ def create_gradio_app() -> gr.Blocks:
             )
         with gr.Row():
             next_btn = gr.Button(
-                "🚀 Process Application", variant="primary", size="lg"
+                "🚀 Next Applicant", variant="primary", size="lg"
             )
             reset_btn = gr.Button("🔄 Reset Portfolio", size="sm")
             export_btn = gr.Button("📤 Export Dissent", size="sm")
@@ -1131,28 +1002,6 @@ def create_gradio_app() -> gr.Blocks:
             label="Exported Dissent JSON",
             visible=False,
         )
-
-        input_fields = [
-            inp_income, inp_credit_score, inp_employment_years, inp_loan_amount, inp_loan_type,
-            inp_mortgage_value, inp_loan_term, inp_existing_debt, inp_age, inp_monthly_expenses,
-            inp_num_dependents, inp_previous_defaults, inp_gst_registered, inp_itr_filed_years,
-            inp_customer_score, inp_spending_volatility, inp_loan_purpose_clarity,
-            inp_application_consistency, inp_bank_kyc_status
-        ]
-
-        dataset_file.upload(
-            fn=handle_dataset_upload,
-            inputs=[dataset_file],
-            outputs=[upload_status] + input_fields
-        )
-
-        load_next_btn.click(
-            fn=load_next_from_dataset,
-            inputs=[],
-            outputs=[upload_status] + input_fields
-        )
-
-        # ── WIRING ──────────────────────────────────────────
 
         # ── WIRING ──────────────────────────────────────────
 
@@ -1187,11 +1036,6 @@ def create_gradio_app() -> gr.Blocks:
         next_flow.then(
             fn=process_next_applicant,
             inputs=[
-                inp_income, inp_credit_score, inp_employment_years, inp_loan_amount, inp_loan_type,
-                inp_mortgage_value, inp_loan_term, inp_existing_debt, inp_age, inp_monthly_expenses,
-                inp_num_dependents, inp_previous_defaults, inp_gst_registered, inp_itr_filed_years,
-                inp_customer_score, inp_spending_volatility, inp_loan_purpose_clarity,
-                inp_application_consistency, inp_bank_kyc_status,
                 action_radio, 
                 risk_weight_slider,
                 fraud_weight_slider,
@@ -1248,7 +1092,8 @@ demo = create_gradio_app()
 
 if __name__ == "__main__":
     # Initialize first observation
-    
+    env.reset()
+
     api_port = _pick_port(APP_HOST, DEFAULT_API_PORT)
     ui_port = _pick_port(APP_HOST, DEFAULT_UI_PORT)
 
