@@ -19,8 +19,23 @@ brain/*.pt
 .DS_Store
 Thumbs.db
 
+# Local utility scripts
+scripts/merge_and_push.py
+scripts/push_existing_model.py
+
 # Model Training Artifacts
 qwen_model/
 mistral-risk-lora-checkpoints/
 mistral-risk-lora/
 mistral-risk-merged/
+qwen2.5-fraud-lora-checkpoints/
+qwen2.5-fraud-lora/
+qwen2.5-fraud-merged/
+llama3-fraud-lora-checkpoints/
+llama3-fraud-lora/
+llama3-fraud-merged/
+offload/
+offload_temp/
+*.safetensors
+*.bin
+*.pt

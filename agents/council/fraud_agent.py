@@ -14,7 +14,9 @@ Explicit safeguards:
 
 import re
 import requests
+import os
 from typing import List, Optional
+from huggingface_hub import InferenceClient
 
 from agents.council.risk_agent import HeadAgentVote
 from agents.sub_agents.risk.credit_analyst import SubAgentReport
@@ -48,10 +50,11 @@ class FraudAgent:
         consistency_flags = self._consistency_flag_count(sub_reports)
 
         try:
-            API_URL = "https://api-inference.huggingface.co/models/keva1ya/qwen-2.5-fraud"
-            headers = {
-                "Authorization": "Bearer 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"
-            }
+            token = os.getenv("HF_TOKEN", "")
+            client = InferenceClient(
+                model="Keva1ya/qwen-2.5-fraud",
+                token=token
+            )
 
             report_lines = []
             for report in sub_reports:
@@ -79,22 +82,11 @@ class FraudAgent:
             )
 
             # Qwen uses ChatML tags
-            payload = {
-                "inputs": f"<|im_start|>user\n{prompt_content}\n<|im_end|>\n<|im_start|>assistant\n",
-                "parameters": {"max_new_tokens": 200, "temperature": 0.3}
-            }
-
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
-            response.raise_for_status()
-            res_json = response.json()
-
-            text = ""
-            if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
-                text = res_json[0]["generated_text"]
-                if "<|im_start|>assistant\n" in text:
-                    text = text.split("<|im_start|>assistant\n")[-1]
-            else:
-                text = str(res_json)
+            text = client.text_generation(
+                prompt=f"<|im_start|>user\n{prompt_content}\n<|im_end|>\n<|im_start|>assistant\n",
+                max_new_tokens=200,
+                temperature=0.3
+            )
 
             decision, confidence, reasoning = self._parse_response(text)
             

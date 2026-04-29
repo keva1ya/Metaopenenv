@@ -12,7 +12,9 @@ of sub-agent signals instead of deterministic rejection rules.
 
 import re
 import requests
+import os
 from typing import List, Optional
+from huggingface_hub import InferenceClient
 
 from agents.council.risk_agent import HeadAgentVote
 from agents.sub_agents.risk.credit_analyst import SubAgentReport
@@ -41,10 +43,11 @@ class PolicyAgent:
         Uses the configured HuggingFace model with soft aggregation fallback.
         """
         try:
-            API_URL = "https://api-inference.huggingface.co/models/Keva1ya/mistral-risk-model"
-            headers = {
-                "Authorization": "Bearer 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"
-            }
+            token = os.getenv("HF_TOKEN", "")
+            client = InferenceClient(
+                model="Keva1ya/mistral-risk-model",
+                token=token
+            )
 
             report_lines = []
             for report in sub_reports:
@@ -68,23 +71,11 @@ class PolicyAgent:
             )
 
             # Mistral commonly uses a different chat template than Qwen, e.g. [INST] [/INST]
-            # Assuming standard Mistral instruct template here.
-            payload = {
-                "inputs": f"[INST] {prompt_content} [/INST]\n",
-                "parameters": {"max_new_tokens": 200, "temperature": 0.3}
-            }
-
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
-            response.raise_for_status()
-            res_json = response.json()
-
-            text = ""
-            if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
-                text = res_json[0]["generated_text"]
-                if "[/INST]\n" in text:
-                    text = text.split("[/INST]\n")[-1]
-            else:
-                text = str(res_json)
+            text = client.text_generation(
+                prompt=f"[INST] {prompt_content} [/INST]\n",
+                max_new_tokens=200,
+                temperature=0.3
+            )
 
             decision, confidence, reasoning = self._parse_response(text)
 

@@ -1,3 +1,14 @@
+---
+title: Sententia MetaOpenEnv
+emoji: ⚖️
+colorFrom: red
+colorTo: slate
+sdk: gradio
+sdk_version: 4.0.0
+app_file: app.py
+pinned: false
+---
+
 <div align="center">
   <img src="https://img.shields.io/badge/Status-Production_Ready-success?style=for-the-badge&logo=rocket" alt="Status"/>
   <img src="https://img.shields.io/badge/Architecture-Multi--Agent_Hierarchical-6B4226?style=for-the-badge" alt="Architecture"/>
@@ -66,7 +77,7 @@ flowchart TD
         TrainGRPO["train_grpo_offline.py<br/>(TRL + GRPO)"]
     end
 
-    subgraph L2["Level 2: Council (HF Inference Endpoints)"]
+    subgraph L2["Level 2: Council (Hugging Face Inference API)"]
         direction LR
         FAgent["FraudAgent<br/>(qwen-2.5-fraud)"]:::green
         PAgent["PolicyAgent<br/>(mistral-risk-model)"]:::purple
@@ -114,10 +125,10 @@ flowchart TD
 ## ⚙️ Technical Deep Dive
 
 ### 1. Data Ingestion & Pydantic Validation
-The environment natively accepts data via CSV/JSON bulk uploads or manual UI entry. Raw data is strictly validated using a Pydantic `LoanObservation` class. All 18 applicant fields must adhere to strict type formatting and numerical constraints (e.g., Credit Score bounded 300–850, Spending Volatility 0.0–1.0).
+The environment natively accepts data via CSV/JSON bulk uploads or manual UI entry. Raw data is validated using a Pydantic `LoanObservation` class. The system supports **unlimited input ranges** for financial fields (Loan Term, Monthly Expenses, etc.), allowing for advanced stress-testing beyond traditional banking boundaries.
 
-### 2. Level 1: The Specialized Sub-Agents (Zero-Cost Deterministic Rules)
-Nine sub-agents evaluate the application strictly within their isolated domains. They do not use LLMs, ensuring zero inference latency.
+### 2. Level 1: Specialized Sub-Agents (Rule-Based + LLM Signal)
+Nine sub-agents evaluate the application within isolated domains. They use a hybrid of deterministic rules and lightweight LLM signals for fluid policy checks.
 *   **Risk Desk:**
     *   `CreditAnalystAgent`: Assesses bureau scores and repayment history.
     *   `IncomeVerifierAgent`: Validates income sufficiency and DTI.
@@ -132,11 +143,11 @@ Nine sub-agents evaluate the application strictly within their isolated domains.
     *   `LTVCheckerAgent`: Ensures Loan-to-Value (collateral vs. amount) is mathematically sound.
 
 ### 3. Level 2: The Council (Domain-Separated LLM Ensemble)
-Three head agents synthesize the 9 sub-reports. Each is powered by a **fine-tuned, domain-specialized LLM** hosted natively on the Hugging Face Inference API. 
-*   **`RiskAgent` (`keva1ya/qwen-risk-merged`):** Tabular reasoning over financial capacity.
-*   **`FraudAgent` (`keva1ya/qwen-2.5-fraud`):** Behavioral integrity. Explicitly enforces a hard `REJECT` veto on failed KYC checks, overriding LLM hallucination potentials.
+Three head agents synthesize the 9 sub-reports. Each is powered by a **fine-tuned, domain-specialized LLM** accessed via `huggingface_hub.InferenceClient`.
+*   **`RiskAgent` (`Keva1ya/qwen-risk-merged`):** Tabular reasoning over financial capacity.
+*   **`FraudAgent` (`Keva1ya/qwen-2.5-fraud`):** Behavioral integrity. Explicitly enforces a hard `REJECT` veto on failed KYC checks.
 *   **`PolicyAgent` (`Keva1ya/mistral-risk-model`):** Multi-rule compliance evaluation using Mistral's instruction templates.
-*   *Fail-Safe:* If any Hugging Face API fails (timeout/rate-limit), agents gracefully default to strict, deterministic rule-based fallbacks to guarantee 100% system uptime.
+*   *Fail-Safe:* If the Hugging Face API is unavailable, agents gracefully default to rule-based fallback logic.
 
 ### 4. Level 3: Dynamic Weight Decision Engine & Dissent Logging
 The council submits votes (`APPROVE`, `REJECT`, `REQUEST_MORE_INFO`) to the `VotingEngine`.

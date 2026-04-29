@@ -134,20 +134,16 @@ dataset_df = None
 dataset_index = 0
 
 
-def _agent_configured(prefix: str, legacy_key_var: str) -> bool:
-    """A council agent is live if HF (per-agent or shared) or legacy OpenRouter is set."""
+def _agent_configured(prefix: str) -> bool:
+    """A council agent is live if HF (per-agent or shared) is set."""
     has_hf = bool(_env_secret(f"{prefix}_API_KEY") or _env_secret("HF_TOKEN"))
-    has_model = bool(_env_secret(f"{prefix}_MODEL"))
-    has_legacy = bool(
-        _env_secret(legacy_key_var) or _env_secret("OPENROUTER_API_KEY")
-    )
-    return (has_hf and has_model) or has_legacy
+    return has_hf
 
 
 DEMO_MODE = not (
-    _agent_configured("RISK", "NEMOTRON_API_KEY")
-    and _agent_configured("FRAUD", "GLM_API_KEY")
-    and _agent_configured("POLICY", "MINIMAX_API_KEY")
+    _agent_configured("RISK")
+    and _agent_configured("FRAUD")
+    and _agent_configured("POLICY")
 )
 
 # ═══════════════════════════════════════════════════════════════
@@ -184,7 +180,7 @@ def get_api_key(api_key_header: str = Security(API_KEY_HEADER)):
         detail="Invalid or missing API Key",
     )
 
-APP_HOST = "127.0.0.1"
+APP_HOST = "0.0.0.0"
 DEFAULT_API_PORT = int(os.getenv("APP_API_PORT", "8000"))
 DEFAULT_UI_PORT = int(os.getenv("APP_UI_PORT", "7860"))
 
@@ -903,7 +899,7 @@ def create_gradio_app() -> gr.Blocks:
         # ── HEADER ──────────────────────────────────────────
         if DEMO_MODE:
             gr.Markdown(
-                "## ⚠️ DEMO MODE — No OpenRouter API keys detected. "
+                "## ⚠️ DEMO MODE — Hugging Face secrets not detected. "
                 "Head agents using rule-based fallback.",
                 elem_classes=["demo-banner"],
             )
@@ -921,7 +917,7 @@ def create_gradio_app() -> gr.Blocks:
                 </div>
                 <div class="hero-grid">
                   <div class="hero-pill"><strong>Architecture</strong><span>Sub-agents -> Council -> Weighted Engine</span></div>
-                  <div class="hero-pill"><strong>Palette</strong><span>Premium scheme built around #660000</span></div>
+                  <div class="hero-pill"><strong>Security</strong><span>Secrets-based HF Authentication</span></div>
                   <div class="hero-pill"><strong>Context</strong><span>AI-based loan analysis, fraud screening, policy review</span></div>
                 </div>
               </div>
@@ -1251,25 +1247,36 @@ if __name__ == "__main__":
     # Initialize first observation
     env.reset()
 
-    api_port = _pick_port(APP_HOST, DEFAULT_API_PORT)
-    ui_port = _pick_port(APP_HOST, DEFAULT_UI_PORT)
+    if os.getenv("SPACE_ID"):
+        # On Hugging Face Spaces, mount Gradio onto FastAPI and run on the provided PORT
+        port = int(os.getenv("PORT", 7860))
+        print(f"Running on Hugging Face Spaces on port {port}")
+        
+        # We mount Gradio onto the FastAPI app 'api'
+        app = gr.mount_gradio_app(api, demo, path="/")
+        
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    else:
+        # Local execution with separate ports
+        api_port = _pick_port(APP_HOST, DEFAULT_API_PORT)
+        ui_port = _pick_port(APP_HOST, DEFAULT_UI_PORT)
 
-    # Start FastAPI in daemon thread
-    api_thread = threading.Thread(target=run_api, args=(api_port,), daemon=True)
-    api_thread.start()
-    print(f"FastAPI running on http://{APP_HOST}:{api_port}")
-    print(f"Gradio UI starting on http://{APP_HOST}:{ui_port}")
+        # Start FastAPI in daemon thread
+        api_thread = threading.Thread(target=run_api, args=(api_port,), daemon=True)
+        api_thread.start()
+        print(f"FastAPI running on http://{APP_HOST}:{api_port}")
+        print(f"Gradio UI starting on http://{APP_HOST}:{ui_port}")
 
-    # Start Gradio
-    ui_username = os.getenv("APP_UI_USERNAME")
-    ui_password = os.getenv("APP_UI_PASSWORD")
-    auth_config = (ui_username, ui_password) if ui_username and ui_password else None
+        # Start Gradio
+        ui_username = os.getenv("APP_UI_USERNAME")
+        ui_password = os.getenv("APP_UI_PASSWORD")
+        auth_config = (ui_username, ui_password) if ui_username and ui_password else None
 
-    demo.launch(
-        server_name=APP_HOST,
-        server_port=ui_port,
-        share=False,
-        theme=APP_THEME,
-        css=APP_CSS,
-        auth=auth_config,
-    )
+        demo.launch(
+            server_name=APP_HOST,
+            server_port=ui_port,
+            share=False,
+            theme=APP_THEME,
+            css=APP_CSS,
+            auth=auth_config,
+        )

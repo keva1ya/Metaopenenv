@@ -9,7 +9,7 @@ Enforces bank policy age requirements and retirement limits.
 import os
 import re
 from typing import List, Optional
-from openai import OpenAI
+from huggingface_hub import InferenceClient
 
 from agents.sub_agents.risk.credit_analyst import SubAgentReport
 from env.observation import LoanObservation
@@ -33,9 +33,10 @@ class ComplianceOfficerAgent:
         "FLAGS: <comma-separated flags>"
     )
 
-    def __init__(self, client: Optional[OpenAI] = None, model_name: str = "openrouter/auto"):
-        self.client = client
+    def __init__(self, model_name: str = "Keva1ya/mistral-risk-model"):
+        self.token = os.getenv("HF_TOKEN")
         self.model_name = model_name
+        self.client = InferenceClient(model=self.model_name, token=self.token) if self.token else None
 
     def analyze(self, obs: LoanObservation) -> SubAgentReport:
         if self.client is None:
@@ -50,16 +51,11 @@ class ComplianceOfficerAgent:
         )
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_MESSAGE},
-                    {"role": "user", "content": prompt},
-                ],
+            text = self.client.text_generation(
+                prompt=f"[INST] {self.SYSTEM_MESSAGE}\n\n{prompt} [/INST]\n",
+                max_new_tokens=150,
                 temperature=0.3,
-                max_tokens=150,
             )
-            text = response.choices[0].message.content.strip()
             return self._parse_response(text)
         except Exception as e:
             print(f"[ComplianceOfficer] LLM failed: {e}")
