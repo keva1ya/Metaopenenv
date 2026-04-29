@@ -746,10 +746,10 @@ def create_gradio_app() -> gr.Blocks:
                     inp_previous_defaults = gr.Number(label="Previous Defaults", value=0)
                     inp_gst_registered = gr.Checkbox(label="GST Registered", value=False)
                     inp_itr_filed_years = gr.Number(label="ITR Filed Years", value=4)
-                    inp_customer_score = gr.Number(value=0.85, label="Customer Score")
-                    inp_spending_volatility = gr.Number(value=0.4, label="Spending Volatility")
-                    inp_loan_purpose_clarity = gr.Number(value=0.9, label="Loan Purpose Clarity")
-                    inp_application_consistency = gr.Number(value=0.95, label="Application Consistency")
+                    inp_customer_score = gr.Slider(minimum=0, maximum=1, value=0.85, label="Customer Score")
+                    inp_spending_volatility = gr.Slider(minimum=0, maximum=1, value=0.4, label="Spending Volatility")
+                    inp_loan_purpose_clarity = gr.Slider(minimum=0, maximum=1, value=0.9, label="Loan Purpose Clarity")
+                    inp_application_consistency = gr.Slider(minimum=0, maximum=1, value=0.95, label="Application Consistency")
                     inp_bank_kyc_status = gr.Dropdown(choices=["VERIFIED", "PENDING", "FAILED"], value="VERIFIED", label="Bank KYC Status")
 
 # ── PANEL 1: Applicant Profile ──────────────────────
@@ -881,14 +881,14 @@ def create_gradio_app() -> gr.Blocks:
         with gr.Accordion("⚖️ Agent Scoring Multipliers (Must sum to 100)", open=True):
             gr.Markdown("Adjust the scoring weights for each head agent. These multipliers will scale the individual LLM confidence outputs.")
             with gr.Row():
-                risk_weight_slider = gr.Number(
-                    value=33, label="Risk Multiplier"
+                risk_weight_slider = gr.Slider(
+                    minimum=0, maximum=100, step=1, value=33, label="Risk Multiplier"
                 )
-                fraud_weight_slider = gr.Number(
-                    value=33, label="Fraud Multiplier"
+                fraud_weight_slider = gr.Slider(
+                    minimum=0, maximum=100, step=1, value=33, label="Fraud Multiplier"
                 )
-                policy_weight_slider = gr.Number(
-                    value=34, label="Policy Multiplier"
+                policy_weight_slider = gr.Slider(
+                    minimum=0, maximum=100, step=1, value=34, label="Policy Multiplier"
                 )
 
 
