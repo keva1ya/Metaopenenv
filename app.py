@@ -624,218 +624,6 @@ def export_dissent():
 # GRADIO UI
 # ═══════════════════════════════════════════════════════════════
 
-APP_THEME = gr.themes.Soft(
-    primary_hue=gr.themes.colors.red,
-    secondary_hue=gr.themes.colors.stone,
-    neutral_hue=gr.themes.colors.slate,
-)
-
-APP_CSS = """
-:root {
-  --brand-deep: #660000;
-  --brand-ink: #2a0000;
-  --brand-rose: #8f4d4d;
-  --paper: #0a0a0a;
-  --ink: #eaeaea;
-  --muted: #888888;
-  --line: rgba(102, 0, 0, 0.4);
-  --panel: rgba(18, 18, 18, 0.95);
-  --shadow: 0 14px 36px rgba(0, 0, 0, 0.9);
-}
-
-body {
-  background: #000000 !important;
-  color: var(--ink);
-}
-
-.gradio-container {
-  background: transparent !important;
-  max-width: 1400px !important;
-  padding: 28px 18px 56px !important;
-}
-
-.gradio-container .block,
-.gradio-container .gr-box,
-.gradio-container .gr-group,
-.gradio-container .gr-form,
-.gradio-container .gr-panel,
-.gradio-container .gr-accordion,
-.gradio-container .gradio-dataframe,
-.gradio-container .gradio-textbox,
-.gradio-container .gradio-number,
-.gradio-container .gradio-json {
-  border-radius: 0px !important;
-}
-
-.gradio-container .gr-box,
-.gradio-container .gr-group,
-.gradio-container .gr-form,
-.gradio-container .gr-panel,
-.gradio-container .gr-accordion,
-.gradio-container .gradio-dataframe,
-.gradio-container .gradio-textbox,
-.gradio-container .gradio-number,
-.gradio-container .gradio-json,
-.gradio-container .gradio-dropdown,
-.gradio-container .gradio-radio {
-  background: var(--panel) !important;
-  border: 1px solid var(--line) !important;
-  box-shadow: var(--shadow) !important;
-}
-
-.hero-shell {
-  margin-bottom: 18px;
-}
-
-.hero-card {
-  padding: 28px 30px;
-  border-radius: 0px;
-  background: linear-gradient(135deg, rgba(43, 31, 31, 0.96), rgba(76, 39, 40, 0.94) 62%, rgba(108, 28, 31, 0.9));
-  color: #fff7f2;
-  box-shadow: 0 20px 48px rgba(58, 17, 18, 0.14);
-  border: 1px solid rgba(255,255,255,0.06);
-}
-
-.hero-kicker {
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
-  font-size: 12px;
-  color: #d8c1bc;
-  margin-bottom: 14px;
-}
-
-.hero-title {
-  font-size: clamp(2rem, 4vw, 3.5rem);
-  line-height: 1.02;
-  font-weight: 650;
-  margin: 0 0 12px;
-  max-width: 720px;
-}
-
-.hero-copy {
-  max-width: 760px;
-  color: #eededa;
-  font-size: 0.98rem;
-  line-height: 1.55;
-}
-
-.hero-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 24px;
-}
-
-.hero-pill {
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: rgba(255, 248, 243, 0.05);
-  border: 1px solid rgba(255, 235, 230, 0.1);
-}
-
-.hero-pill strong {
-  display: block;
-  font-size: 0.78rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #dec1bb;
-  margin-bottom: 4px;
-}
-
-.hero-pill span {
-  font-size: 1rem;
-  color: #fff7f2;
-}
-
-.demo-banner > div {
-  background: linear-gradient(90deg, rgba(102,0,0,0.16), rgba(102,0,0,0.05)) !important;
-  border: 1px solid rgba(102,0,0,0.18) !important;
-  border-radius: 20px !important;
-  color: var(--brand-ink) !important;
-}
-
-.gradio-container h3 {
-  color: var(--brand-ink) !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.02em;
-}
-
-.gradio-container .gr-dataframe,
-.gradio-container .gradio-dataframe {
-  border-radius: 0px !important;
-}
-
-.financial-profile-panel,
-.behavioral-profile-panel,
-.financial-profile-column,
-.behavioral-profile-column,
-.financial-profile-panel > div,
-.behavioral-profile-panel > div,
-.financial-profile-column > div,
-.behavioral-profile-column > div,
-.financial-profile-panel .gradio-dataframe,
-.behavioral-profile-panel .gradio-dataframe,
-.financial-profile-panel .gr-dataframe,
-.behavioral-profile-panel .gr-dataframe,
-.financial-profile-column .gr-box,
-.behavioral-profile-column .gr-box,
-.financial-profile-column .gr-panel,
-.behavioral-profile-column .gr-panel {
-    border-radius: 0px !important;
-}
-
-.financial-profile-column *,
-.behavioral-profile-column * {
-    border-radius: 0px !important;
-}
-
-
-
-
-
-.gradio-container hr {
-  border: 0 !important;
-  height: 1px !important;
-  background: linear-gradient(90deg, transparent, rgba(102, 0, 0, 0.22), transparent) !important;
-  margin: 22px 0 16px !important;
-}
-
-.gradio-container .gr-button-primary,
-.gradio-container button.primary {
-  background: linear-gradient(135deg, #660000, #8a1c1c) !important;
-  border: none !important;
-  color: #fff8f3 !important;
-  border-radius: 999px !important;
-  box-shadow: 0 16px 34px rgba(102, 0, 0, 0.28) !important;
-}
-
-.gradio-container button:not(.primary) {
-  border-radius: 999px !important;
-}
-
-.gradio-container .gr-accordion summary {
-  background: rgba(102, 0, 0, 0.04) !important;
-  color: var(--brand-ink) !important;
-}
-
-.gradio-container .gr-dataframe table thead tr {
-  background: rgba(102, 0, 0, 0.07) !important;
-}
-
-.gradio-container .gr-dataframe table th {
-  color: var(--brand-ink) !important;
-}
-
-@media (max-width: 900px) {
-  .hero-card {
-    padding: 26px 22px;
-  }
-  .hero-grid {
-    grid-template-columns: 1fr;
-  }
-}
-"""
-
 
 
 def handle_dataset_upload(file):
@@ -958,10 +746,10 @@ def create_gradio_app() -> gr.Blocks:
                     inp_previous_defaults = gr.Number(label="Previous Defaults", value=0)
                     inp_gst_registered = gr.Checkbox(label="GST Registered", value=False)
                     inp_itr_filed_years = gr.Number(label="ITR Filed Years", value=4)
-                    inp_customer_score = gr.Slider(minimum=0, maximum=1, value=0.85, label="Customer Score")
-                    inp_spending_volatility = gr.Slider(minimum=0, maximum=1, value=0.4, label="Spending Volatility")
-                    inp_loan_purpose_clarity = gr.Slider(minimum=0, maximum=1, value=0.9, label="Loan Purpose Clarity")
-                    inp_application_consistency = gr.Slider(minimum=0, maximum=1, value=0.95, label="Application Consistency")
+                    inp_customer_score = gr.Number(value=0.85, label="Customer Score")
+                    inp_spending_volatility = gr.Number(value=0.4, label="Spending Volatility")
+                    inp_loan_purpose_clarity = gr.Number(value=0.9, label="Loan Purpose Clarity")
+                    inp_application_consistency = gr.Number(value=0.95, label="Application Consistency")
                     inp_bank_kyc_status = gr.Dropdown(choices=["VERIFIED", "PENDING", "FAILED"], value="VERIFIED", label="Bank KYC Status")
 
 # ── PANEL 1: Applicant Profile ──────────────────────
@@ -1094,13 +882,13 @@ def create_gradio_app() -> gr.Blocks:
             gr.Markdown("Adjust the scoring weights for each head agent. These multipliers will scale the individual LLM confidence outputs.")
             with gr.Row():
                 risk_weight_slider = gr.Number(
-                    minimum=0, maximum=100, value=33, label="Risk Multiplier"
+                    value=33, label="Risk Multiplier"
                 )
                 fraud_weight_slider = gr.Number(
-                    minimum=0, maximum=100, value=33, label="Fraud Multiplier"
+                    value=33, label="Fraud Multiplier"
                 )
                 policy_weight_slider = gr.Number(
-                    minimum=0, maximum=100, value=34, label="Policy Multiplier"
+                    value=34, label="Policy Multiplier"
                 )
 
 
@@ -1119,7 +907,7 @@ def create_gradio_app() -> gr.Blocks:
             )
         with gr.Row():
             next_btn = gr.Button(
-                "🚀 Next Applicant", variant="primary", size="lg"
+                "🚀 Analyze", variant="primary", size="lg"
             )
             reset_btn = gr.Button("🔄 Reset Portfolio", size="sm")
             export_btn = gr.Button("📤 Export Dissent", size="sm")
@@ -1276,7 +1064,5 @@ if __name__ == "__main__":
             server_name=APP_HOST,
             server_port=ui_port,
             share=False,
-            theme=APP_THEME,
-            css=APP_CSS,
             auth=auth_config,
         )
