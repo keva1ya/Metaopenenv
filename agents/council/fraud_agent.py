@@ -13,7 +13,6 @@ Explicit safeguards:
 """
 
 import re
-import requests
 import os
 from typing import List, Optional
 from huggingface_hub import InferenceClient

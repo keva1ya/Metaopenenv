@@ -9,7 +9,6 @@ On ANY exception: falls back to majority vote of sub-agents.
 """
 
 import re
-import requests
 import os
 from typing import List, Optional
 from huggingface_hub import InferenceClient
